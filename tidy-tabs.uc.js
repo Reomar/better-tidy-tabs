@@ -39,6 +39,109 @@
     REQUEST_TIMEOUT_MS: 15000,
   };
 
+  const ATG_ICON_CATALOG = {
+    developer: {
+      label: "Developer / coding",
+      url: "chrome://global/skin/icons/developer.svg",
+    },
+    search: {
+      label: "Search / research",
+      url: "chrome://global/skin/icons/search-textbox.svg",
+    },
+    folder: {
+      label: "Docs / files / organization",
+      url: "chrome://global/skin/icons/folder.svg",
+    },
+    warning: {
+      label: "Troubleshooting / warnings / bugs",
+      url: "chrome://global/skin/icons/warning.svg",
+    },
+    error: {
+      label: "Errors / failures / broken states",
+      url: "chrome://global/skin/icons/error.svg",
+    },
+    security: {
+      label: "Auth / security / accounts",
+      url: "chrome://global/skin/icons/security.svg",
+    },
+    link: {
+      label: "Links / web / references",
+      url: "chrome://global/skin/icons/link.svg",
+    },
+    lightbulb: {
+      label: "Ideas / planning / notes",
+      url: "chrome://global/skin/icons/lightbulb.svg",
+    },
+    settings: {
+      label: "Preferences / configuration",
+      url: "chrome://global/skin/icons/settings.svg",
+    },
+    info: {
+      label: "Info / reading / general reference",
+      url: "chrome://global/skin/icons/info.svg",
+    },
+    trend: {
+      label: "News / trends / discovery",
+      url: "chrome://global/skin/icons/trending.svg",
+    },
+    plugin: {
+      label: "Extensions / add-ons / integrations",
+      url: "chrome://global/skin/icons/plugin.svg",
+    },
+    performance: {
+      label: "Performance / profiling / benchmarking",
+      url: "chrome://global/skin/icons/performance.svg",
+    },
+    reload: {
+      label: "Refresh / iteration / retry",
+      url: "chrome://global/skin/icons/reload.svg",
+    },
+    trophy: {
+      label: "Goals / milestones / success",
+      url: "chrome://global/skin/icons/trophy.svg",
+    },
+    heart: {
+      label: "Favorites / saved / personal",
+      url: "chrome://global/skin/icons/heart.svg",
+    },
+    downloads: {
+      label: "Downloads / assets",
+      url: "chrome://browser/skin/zen-icons/downloads.svg",
+    },
+    sidebar: {
+      label: "Browser UI / sidebar / Zen",
+      url: "chrome://browser/skin/zen-icons/sidebar.svg",
+    },
+    permissions: {
+      label: "Permissions / browser controls",
+      url: "chrome://browser/skin/zen-icons/permissions.svg",
+    },
+    translations: {
+      label: "Translation / language",
+      url: "chrome://browser/skin/zen-icons/translations.svg",
+    },
+  };
+
+  const ATG_ICON_KEYWORDS = [
+    { iconId: "warning", pattern: /\b(troubleshoot|troubleshooting|debug|bug|issue|fix|problem)\b/i },
+    { iconId: "error", pattern: /\b(error|broken|failure|failing|crash)\b/i },
+    { iconId: "security", pattern: /\b(auth|login|sign in|signin|account|security|permission)\b/i },
+    { iconId: "developer", pattern: /\b(code|coding|dev|develop|repo|github|gitlab|pull request|pr|api)\b/i },
+    { iconId: "search", pattern: /\b(search|research|lookup|google|find)\b/i },
+    { iconId: "folder", pattern: /\b(doc|docs|documentation|readme|guide|file|files)\b/i },
+    { iconId: "plugin", pattern: /\b(extension|plugin|addon|integration|mod)\b/i },
+    { iconId: "settings", pattern: /\b(settings|preferences|config|configuration)\b/i },
+    { iconId: "performance", pattern: /\b(performance|profiling|profile|benchmark|speed)\b/i },
+    { iconId: "downloads", pattern: /\b(download|downloads|asset|assets)\b/i },
+    { iconId: "translations", pattern: /\b(translate|translation|language|locale)\b/i },
+    { iconId: "sidebar", pattern: /\b(zen|browser|sidebar|tabs|workspace)\b/i },
+    { iconId: "trend", pattern: /\b(news|trend|trending|discover)\b/i },
+    { iconId: "lightbulb", pattern: /\b(idea|ideas|plan|planning|note|notes)\b/i },
+    { iconId: "reload", pattern: /\b(retry|refresh|reload|rerun|again)\b/i },
+    { iconId: "trophy", pattern: /\b(goal|milestone|launch|release|done|success)\b/i },
+    { iconId: "heart", pattern: /\b(favorite|saved|personal)\b/i },
+  ];
+
   // --- Globals & State ---
   let isSorting = false;
   let sortButtonListenerAdded = false;
@@ -210,6 +313,11 @@
     return topic.trim().toLowerCase();
   };
 
+  const normalizeIconId = (iconId) => {
+    if (!iconId || typeof iconId !== "string") return "";
+    return iconId.trim().toLowerCase().replace(/[^a-z0-9-]/g, "");
+  };
+
   const sanitizeTopicName = (topic, fallback = "Group") => {
     const safeFallback =
       typeof fallback === "string" && fallback.trim() ? fallback.trim() : "Group";
@@ -229,6 +337,69 @@
 
   const uniqueArray = (items) => Array.from(new Set(items.filter(Boolean)));
 
+  const isValidIconId = (iconId) =>
+    !!ATG_ICON_CATALOG[normalizeIconId(iconId)];
+
+  const getIconUrlForIconId = (iconId) =>
+    ATG_ICON_CATALOG[normalizeIconId(iconId)]?.url || null;
+
+  const getIconCatalogPromptText = () =>
+    Object.entries(ATG_ICON_CATALOG)
+      .map(([iconId, { label }]) => `${iconId}: ${label}`)
+      .join("\n");
+
+  const getFallbackIconIdForTopic = (topic) => {
+    if (!topic || typeof topic !== "string") {
+      return "folder";
+    }
+
+    const match = ATG_ICON_KEYWORDS.find(({ pattern }) => pattern.test(topic));
+    return match?.iconId || "folder";
+  };
+
+  const getResolvedIconId = (iconId, topic) =>
+    isValidIconId(iconId) ? normalizeIconId(iconId) : getFallbackIconIdForTopic(topic);
+
+  const groupHasATGIcon = (group) => {
+    if (!group?.isConnected) return false;
+
+    try {
+      if (globalThis.advancedTabGroups?.savedIcons?.[group.id]) {
+        return true;
+      }
+    } catch {
+      // Ignore ATG state read failures and fall through to DOM inspection.
+    }
+
+    return !!group.querySelector(
+      ".tab-group-icon .group-icon, .tab-group-icon label"
+    );
+  };
+
+  const applyATGGroupIconIfNeeded = async (group, iconId) => {
+    const resolvedIconId = getResolvedIconId(iconId, group?.getAttribute("label") || "");
+    const iconUrl = getIconUrlForIconId(resolvedIconId);
+
+    if (
+      !group?.isConnected ||
+      !iconUrl ||
+      !globalThis.advancedTabGroups ||
+      typeof globalThis.advancedTabGroups.applyGroupIcon !== "function" ||
+      groupHasATGIcon(group)
+    ) {
+      return;
+    }
+
+    try {
+      await globalThis.advancedTabGroups.applyGroupIcon(group, iconUrl);
+    } catch (error) {
+      console.error(
+        `[TabSort] Failed applying ATG icon "${resolvedIconId}" to group "${group.getAttribute("label") || "Unknown"}":`,
+        error
+      );
+    }
+  };
+
   const buildFinalGroupsFromAssignments = (
     assignments,
     existingGroupNameMap = new Map()
@@ -236,7 +407,7 @@
     const finalGroups = {};
     const seenTabs = new Set();
 
-    assignments.forEach(({ tab, topic }) => {
+    assignments.forEach(({ tab, topic, iconId }) => {
       // Providers own the grouping decision now. This layer only drops
       // invalid/duplicate assignments and preserves exact existing-group names.
       if (
@@ -260,15 +431,22 @@
       }
 
       if (!finalGroups[finalTopic]) {
-        finalGroups[finalTopic] = [];
+        finalGroups[finalTopic] = {
+          tabs: [],
+          iconId: getResolvedIconId(iconId, finalTopic),
+        };
       }
 
-      finalGroups[finalTopic].push(tab);
+      finalGroups[finalTopic].tabs.push(tab);
+      if (!finalGroups[finalTopic].iconId && iconId) {
+        finalGroups[finalTopic].iconId = getResolvedIconId(iconId, finalTopic);
+      }
       seenTabs.add(tab);
     });
 
-    Object.keys(finalGroups).forEach((groupName) => {
-      finalGroups[groupName] = uniqueArray(finalGroups[groupName]);
+    Object.entries(finalGroups).forEach(([groupName, groupData]) => {
+      groupData.tabs = uniqueArray(groupData.tabs);
+      groupData.iconId = getResolvedIconId(groupData.iconId, groupName);
     });
 
     return finalGroups;
@@ -582,8 +760,12 @@
       "Do not create singleton niche groups unless a tab genuinely deserves its own group.",
       "Put weak, isolated, or miscellaneous tabs into Others.",
       "Favor useful work-context grouping over literal title similarity.",
-      'Return only valid JSON with this exact shape: {"assignments":[{"tabId":"t1","topic":"Example"}]}.',
+      "Choose exactly one iconId for each assignment from the supported icon catalog below.",
+      'Return only valid JSON with this exact shape: {"assignments":[{"tabId":"t1","topic":"Example","iconId":"folder"}]}.',
       "Do not include markdown fences, prose, explanations, or extra keys.",
+      "",
+      "Supported icons:",
+      getIconCatalogPromptText(),
       "",
       "Existing groups:",
       existingGroupsText,
@@ -645,6 +827,7 @@
           properties: {
             tabId: { type: "STRING" },
             topic: { type: "STRING" },
+            iconId: { type: "STRING" },
           },
           required: ["tabId", "topic"],
         },
@@ -924,6 +1107,10 @@
             ? {
                 tab: tabRecord.tab,
                 topic: assignment.topic,
+                iconId:
+                  typeof assignment.iconId === "string"
+                    ? normalizeIconId(assignment.iconId)
+                    : "",
               }
             : null;
         })
@@ -1076,9 +1263,10 @@
       const groupTabs = group.map((index) => validTabs[validIndices[index]]);
       const groupTitles = groupTabs.map((tab) => getTabTitle(tab));
       const groupName = await nameGroupWithSmartTabTopic(groupTitles);
+      const iconId = getFallbackIconIdForTopic(groupName);
 
       groupTabs.forEach((tab) => {
-        result.push({ tab, topic: groupName });
+        result.push({ tab, topic: groupName, iconId });
       });
 
       console.log(
@@ -1346,7 +1534,8 @@
 
       // --- Process each final, consolidated group ---
       for (const topic in finalGroups) {
-        const tabsForThisTopic = finalGroups[topic].filter((t) => {
+        const groupData = finalGroups[topic];
+        const tabsForThisTopic = groupData.tabs.filter((t) => {
           const groupParent = t.closest("tab-group");
           const isInGroupInCorrectWorkspace = groupParent
             ? groupParent.matches(groupSelector)
@@ -1385,6 +1574,10 @@
                 );
               }
             }
+            await applyATGGroupIconIfNeeded(
+              existingGroupElement,
+              groupData.iconId
+            );
           } catch (e) {
             console.error(
               `Error moving tabs to existing group "${topic}":`,
@@ -1422,6 +1615,8 @@
                 } catch (e) {
                   // Silently ignore if advanced-tab-groups is not installed
                 }
+
+                await applyATGGroupIconIfNeeded(newGroup, groupData.iconId);
               } else {
                 console.warn(
                   ` -> addTabGroup didn't return a connected element for "${topic}". Attempting fallback find.`
@@ -1447,6 +1642,11 @@
                   } catch (e) {
                     // Silently ignore if advanced-tab-groups is not installed
                   }
+
+                  await applyATGGroupIconIfNeeded(
+                    newGroupElFallback,
+                    groupData.iconId
+                  );
                 } else {
                   console.error(
                     ` -> Failed to find the newly created group element for "${topic}" even with fallback.`
@@ -1476,6 +1676,11 @@
                 } catch (e) {
                   // Silently ignore if advanced-tab-groups is not installed
                 }
+
+                await applyATGGroupIconIfNeeded(
+                  groupAfterError,
+                  groupData.iconId
+                );
               } else {
                 console.error(
                   ` -> Failed to find group "${topic}" after creation error.`
