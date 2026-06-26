@@ -2,111 +2,94 @@
 
 ## Overview
 
-This repository is not a conventional web app or Node project. It is a Zen Browser / Firefox chrome mod package that injects:
+This repository is a Zen Browser chrome mod forked from `Vertex-Mods/Zen-Tidy-Tabs`.
 
-- `tidy-tabs.uc.js`: the main browser-chrome script
-- `userChrome.css`: styling for the custom button and separator animations
-- `theme.json`: package metadata for the mod loader
-- `preferences.json`: exposed preference toggles
+It injects a brush button and separator line into Zen's vertical tabs sidebar, then sorts ungrouped tabs into task-based groups. The fork keeps the original local Firefox ML path, adds an optional Gemini provider, and reshapes grouping so it prefers active task context over literal page-title similarity.
 
-The feature adds an AI-powered "Sort Tabs" button to Zen Browser's vertical tab UI. It groups ungrouped tabs by topic using Firefox local ML models, prefers matching tabs into existing groups first, creates new tab groups when needed, and patches Zen's "close unpinned tabs" behavior so grouped tabs are preserved.
-
-## Repo Layout
+## Files
 
 - `tidy-tabs.uc.js`
-  Main logic. Runs in the privileged browser UI context, not in page content.
+  Main privileged browser-chrome script.
 - `userChrome.css`
-  Styles and animations for the separator line, broom button, and sorting states.
+  Styles for the line, brush button, animations, and states.
 - `theme.json`
-  Mod manifest. Declares script injection target, chrome CSS, metadata, and dependency on `Vertex-Mods/Advanced-Tab-Groups`.
+  Sine/Zen mod manifest.
 - `preferences.json`
-  Exposes `browser.ml.enabled` as a UI toggle and forces it on by default.
+  Sine settings surface for AI enablement, provider choice, and Gemini API key.
 - `README.md`
-  Minimal public-facing description.
-- `image.png`
-  Preview asset.
+  Public fork documentation and install instructions.
 
-## Runtime Model
+## Runtime Constraints
 
-This code executes inside Zen Browser's chrome context and depends on browser internals such as:
+- This code runs in Zen/Firefox chrome context, not web-page context.
+- It depends on Zen globals and browser internals such as `gBrowser`, `gZenWorkspaces`, `gZenUIManager`, and `MozXULElement`.
+- DOM timing is fragile. Zen may re-render the sidebar separators and workspace containers at any time.
+- There is no build step or automated test suite.
 
-- `gBrowser`
-- `gZenWorkspaces`
-- `gZenUIManager`
-- `MozXULElement`
-- `ChromeUtils.importESModule(...)`
+## Current Product Behavior
 
-It is tightly coupled to Zen's tab/workspace DOM and APIs. Do not treat it like standard frontend code.
+- Injects the sort UI into `.pinned-tabs-container-separator`.
+- Sorts only tabs from the active workspace.
+- Prefers matching new tabs into existing groups first.
+- Uses task-first grouping for remaining tabs.
+- Sends weak or isolated leftovers to `Others`.
+- Preserves grouped tabs during Zen's clear-tabs flow.
+- Falls back to Firefox local AI if Gemini fails.
 
-## Main Flow
+## Provider Model
 
-High-level behavior in `tidy-tabs.uc.js`:
+The mod supports two providers:
 
-1. Initialization waits until the tab UI, command set, and `gZenWorkspaces` are available.
-2. The script injects an SVG separator line and a custom `#sort-button` into each `.pinned-tabs-container-separator`.
-3. Clicking the button triggers a command handler that starts an animation and runs sorting.
-4. Sorting collects ungrouped tabs in the active workspace only.
-5. It generates embeddings via Firefox local ML using `Mozilla/smart-tab-embedding`.
-6. It tries to match tabs into existing groups by embedding similarity, then title similarity.
-7. Remaining tabs are clustered by cosine similarity.
-8. New clusters are named via `Mozilla/smart-tab-topic`.
-9. Tabs are moved into existing groups or new groups are created with `gBrowser.addTabGroup(...)`.
-10. The workspace tab container is reordered so groups appear before ungrouped tabs.
-11. Button visibility is recomputed from workspace/group state.
+- `firefox-local`
+  Default. Uses Firefox local ML models and cached embeddings.
+- `gemini`
+  Optional cloud mode. Requires `extension.zen-tidy-tabs.gemini-api-key`.
 
-## Important Functions
+The settings UI intentionally keeps the Gemini API key field always visible. Sine's conditional preference rendering currently throws in `preferences.sys.mjs`, so do not reintroduce conditional field visibility unless that upstream bug is confirmed fixed.
 
-- `getFilteredTabs(...)`
-  Central filter for workspace-scoped tab selection.
-- `generateEmbedding(...)`
-  Calls Firefox's local ML engine for tab-title embeddings.
-- `askAIForMultipleTopics(...)`
-  Core grouping pipeline: existing-group matching, clustering, and topic naming.
-- `sortTabsByTopic(...)`
-  Orchestrates the full sort, DOM moves, failure handling, and cleanup.
-- `setupgZenWorkspacesHooks(...)`
-  Hooks Zen workspace lifecycle methods so injected UI survives workspace updates.
-- `patchClearButtonToPreserveGroups(...)`
-  Overrides Zen's clear-tabs behavior to avoid deleting grouped tabs.
-- `updateButtonsVisibilityState(...)`
-  Controls when the sort button is shown.
+## Grouping Intent
 
-## Editing Guidelines
+The fork should group by task and category, not by narrow page-title fragments.
 
-- Keep all logic scoped to the active workspace using `zen-workspace-id`.
-- Preserve support for existing tab groups before creating new ones.
-- Be careful with DOM assumptions. Zen may re-render separators and workspace containers.
-- Do not remove the initialization polling unless you replace it with something equally reliable in browser chrome context.
-- Treat animations and cleanup as stateful. `sortAnimationId`, `isSorting`, and `isPlayingFailureAnimation` prevent bad overlap.
-- Fail softly. The current script logs errors and continues where possible because browser chrome errors are user-visible and hard to recover from.
-- Keep optional compatibility with `Advanced-Tab-Groups`; calls like `_useFaviconColor()` must remain guarded.
-- Prefer small changes. This code relies on browser-specific globals that are not unit-tested here.
+Good outcomes:
 
-## CSS Guidelines
+- several GitHub, docs, and search tabs for the same task collapse into one broader research group
+- debugging pages cluster into `Troubleshooting`
+- orphan tabs land in `Others`
 
-- `userChrome.css` is responsible for both layout and visual feedback.
-- The custom button is intentionally inserted next to Zen's native clear button and inherits theme color behavior.
-- The separator line animation depends on the script-created `#separator-path` SVG path.
-- If you rename selectors or IDs in JS, update CSS in lockstep.
+Bad outcomes:
+
+- many single-tab groups
+- separate groups for each GitHub repo when they are part of one task
+- leaving obviously related tabs unsorted
+
+## Important Areas In `tidy-tabs.uc.js`
+
+- provider selection and request fallback
+- local embedding cache behavior
+- existing-group matching
+- task-profile extraction and post-processing merges
+- sidebar injection and visibility updates
+- clear-tabs patching
+
+Be careful when changing any of those paths because failures are visible directly in the browser UI.
+
+## Editing Rules
+
+- Keep logic scoped to the active workspace via `zen-workspace-id`.
+- Preserve compatibility with existing tab groups and `Advanced-Tab-Groups`.
+- Do not assume sidebar parents exist; guard DOM access aggressively.
+- If JS changes IDs or selectors, update `userChrome.css` in lockstep.
+- Prefer soft failure and fallback over throwing from chrome context.
+- Use ASCII unless the file already needs something else.
 
 ## Validation
 
-There is no automated test suite in this repo.
+Manual validation in Zen is required:
 
-Validate changes manually in Zen Browser:
-
-1. Load/install the mod in the target Zen setup.
-2. Confirm the sort button appears in the vertical tabs separator.
-3. Test with:
-   - many ungrouped tabs
-   - an existing group plus one relevant ungrouped tab
-   - multiple workspaces
-   - pinned tabs, selected tabs, empty tabs, and glance tabs
-4. Confirm grouped tabs survive the "close unpinned tabs" action.
-5. Verify failure animation still triggers when no meaningful grouping can be produced.
-
-## Constraints
-
-- No build step, package manager, or local app server exists here.
-- Changes should remain compatible with Firefox chrome JS and Zen-specific DOM/APIs.
-- Browser ML must be enabled for AI behavior to work; the repo exposes this via `preferences.json`.
+1. Import or reload the mod through Sine Mods.
+2. Confirm the separator line and brush button appear when sortable tabs exist.
+3. Test both providers.
+4. Test existing-group matching plus new-group creation.
+5. Confirm leftovers go to `Others`.
+6. Confirm clear-tabs still preserves grouped tabs.

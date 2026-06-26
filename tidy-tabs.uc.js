@@ -41,6 +41,84 @@
     REQUEST_TIMEOUT_MS: 15000,
   };
 
+  const TASK_GROUP_CONFIG = {
+    MIN_NAMED_GROUP_SIZE: 2,
+    OTHERS_GROUP_NAME: "Others",
+    MERGE_THRESHOLD: 1.8,
+  };
+
+  const TASK_TOKEN_NORMALIZATION = {
+    tabs: "tab",
+    tab: "tab",
+    sorting: "sort",
+    sorted: "sort",
+    sorter: "sort",
+    browser: "browser",
+    browsers: "browser",
+    issues: "issue",
+    issue: "issue",
+    troubleshooting: "troubleshoot",
+    troubleshoot: "troubleshoot",
+    errors: "error",
+    docs: "doc",
+    documentation: "doc",
+    repos: "repo",
+    repositories: "repo",
+    repository: "repo",
+    signin: "login",
+    login: "login",
+    logged: "login",
+    searching: "search",
+    searches: "search",
+  };
+
+  const TASK_STOP_WORDS = new Set([
+    "the",
+    "and",
+    "for",
+    "with",
+    "from",
+    "into",
+    "your",
+    "using",
+    "make",
+    "look",
+    "awesome",
+    "includes",
+    "install",
+    "home",
+    "page",
+    "github",
+    "google",
+    "gitlab",
+    "www",
+    "com",
+    "org",
+    "net",
+    "sign",
+    "login",
+    "issue",
+    "pull",
+    "request",
+    "repo",
+    "new",
+    "open",
+    "store",
+    "information",
+    "advanced",
+    "preferences",
+    "tutorial",
+    "work",
+    "agents",
+  ]);
+
+  const SEARCH_HOSTS = new Set([
+    "google.com",
+    "bing.com",
+    "duckduckgo.com",
+    "search.brave.com",
+  ]);
+
   // --- Globals & State ---
   let isSorting = false;
   let sortButtonListenerAdded = false;
@@ -226,6 +304,343 @@
       .slice(0, GEMINI_CONFIG.MAX_GROUP_NAME_LENGTH);
 
     return cleaned || safeFallback;
+  };
+
+  const incrementMapCount = (map, key, amount = 1) => {
+    if (!key) return;
+    map.set(key, (map.get(key) || 0) + amount);
+  };
+
+  const uniqueArray = (items) => Array.from(new Set(items.filter(Boolean)));
+
+  const extractTaskTokens = (...parts) => {
+    const rawTokens = parts
+      .filter((part) => typeof part === "string" && part.trim())
+      .join(" ")
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, " ")
+      .split(/\s+/)
+      .filter(Boolean);
+
+    return uniqueArray(
+      rawTokens
+        .map((token) => TASK_TOKEN_NORMALIZATION[token] || token)
+        .filter((token) => token.length > 2 && !TASK_STOP_WORDS.has(token))
+    );
+  };
+
+  const buildTabTaskProfile = (tab) => {
+    const title = getTabTitle(tab);
+    const navigationInfo = getTabNavigationInfo(tab);
+    const host = navigationInfo.host.toLowerCase();
+    const pathHint = navigationInfo.pathHint.toLowerCase();
+    const tokens = extractTaskTokens(
+      title,
+      host.replace(/\./g, " "),
+      pathHint.replace(/[\/_-]/g, " ")
+    );
+    const categories = new Set();
+
+    if (
+      tokens.includes("troubleshoot") ||
+      tokens.includes("error") ||
+      tokens.includes("debug") ||
+      tokens.includes("fix") ||
+      tokens.includes("problem")
+    ) {
+      categories.add("troubleshooting");
+    }
+
+    if (
+      host === "github.com" ||
+      host === "gitlab.com" ||
+      host.endsWith(".github.com") ||
+      host.includes("stackoverflow") ||
+      host.includes("yarnpkg.com") ||
+      host.includes("npmjs.com") ||
+      host.includes("developer.mozilla.org") ||
+      host.startsWith("docs.") ||
+      tokens.includes("browser") ||
+      tokens.includes("extension") ||
+      tokens.includes("plugin")
+    ) {
+      categories.add("research");
+    }
+
+    if (SEARCH_HOSTS.has(host)) {
+      categories.add("search");
+    }
+
+    if (
+      /\bsign in\b|\blog in\b|\blogin\b|\bauth\b|\baccount\b/i.test(title) ||
+      tokens.includes("login") ||
+      tokens.includes("auth")
+    ) {
+      categories.add("auth");
+    }
+
+    return {
+      tab,
+      title,
+      host,
+      pathHint,
+      tokens,
+      categories,
+    };
+  };
+
+  const buildTaskGroupProfile = (groupName, tabs, lockedExistingNames = new Set()) => {
+    const tabProfiles = tabs.map((tab) => buildTabTaskProfile(tab));
+    const tokenCounts = new Map();
+    const hostCounts = new Map();
+    const categoryCounts = new Map();
+
+    tabProfiles.forEach((profile) => {
+      profile.tokens.forEach((token) => incrementMapCount(tokenCounts, token));
+      if (profile.host) {
+        incrementMapCount(hostCounts, profile.host);
+      }
+      profile.categories.forEach((category) =>
+        incrementMapCount(categoryCounts, category)
+      );
+    });
+
+    const primaryHost =
+      [...hostCounts.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] || "";
+
+    return {
+      sourceName: groupName,
+      tabs,
+      tabProfiles,
+      tokenCounts,
+      hostCounts,
+      categoryCounts,
+      primaryHost,
+      isLockedExisting:
+        lockedExistingNames.has(groupName) &&
+        groupName !== TASK_GROUP_CONFIG.OTHERS_GROUP_NAME,
+    };
+  };
+
+  const getSharedTaskTokens = (profileA, profileB) => {
+    const tokensA = new Set(profileA.tokenCounts.keys());
+    return [...profileB.tokenCounts.keys()].filter((token) => tokensA.has(token));
+  };
+
+  const calculateTaskGroupSimilarity = (profileA, profileB) => {
+    if (profileA.isLockedExisting || profileB.isLockedExisting) {
+      return -Infinity;
+    }
+
+    let score = 0;
+    const sharedTokens = getSharedTaskTokens(profileA, profileB);
+
+    score += Math.min(sharedTokens.length, 3) * 0.7;
+
+    if (
+      sharedTokens.includes("tab") &&
+      (sharedTokens.includes("sort") ||
+        sharedTokens.includes("browser") ||
+        sharedTokens.includes("zen"))
+    ) {
+      score += 1;
+    }
+
+    if (
+      profileA.categoryCounts.has("troubleshooting") &&
+      profileB.categoryCounts.has("troubleshooting")
+    ) {
+      score += 1.5;
+    }
+
+    if (
+      profileA.categoryCounts.has("research") &&
+      profileB.categoryCounts.has("research")
+    ) {
+      score += 0.8;
+    }
+
+    if (
+      (profileA.categoryCounts.has("search") &&
+        profileB.categoryCounts.has("research")) ||
+      (profileB.categoryCounts.has("search") &&
+        profileA.categoryCounts.has("research"))
+    ) {
+      score += 0.6;
+    }
+
+    if (
+      (profileA.categoryCounts.has("auth") &&
+        profileB.categoryCounts.has("research") &&
+        profileA.primaryHost === "github.com" &&
+        profileB.primaryHost === "github.com") ||
+      (profileB.categoryCounts.has("auth") &&
+        profileA.categoryCounts.has("research") &&
+        profileA.primaryHost === "github.com" &&
+        profileB.primaryHost === "github.com")
+    ) {
+      score += 1.4;
+    }
+
+    if (
+      profileA.primaryHost &&
+      profileA.primaryHost === profileB.primaryHost &&
+      !SEARCH_HOSTS.has(profileA.primaryHost)
+    ) {
+      score += 0.5;
+    }
+
+    return score;
+  };
+
+  const mergeTaskGroupProfiles = (targetProfile, sourceProfile) => {
+    const mergedTabs = uniqueArray([...targetProfile.tabs, ...sourceProfile.tabs]);
+    return buildTaskGroupProfile(
+      targetProfile.sourceName,
+      mergedTabs,
+      new Set()
+    );
+  };
+
+  const getTopTaskTokens = (tokenCounts, limit = 3) =>
+    [...tokenCounts.entries()]
+      .sort((a, b) => b[1] - a[1])
+      .map(([token]) => token)
+      .slice(0, limit);
+
+  const inferTaskGroupName = (profile) => {
+    const topTokens = getTopTaskTokens(profile.tokenCounts, 4);
+
+    if (profile.categoryCounts.has("troubleshooting")) {
+      return "Troubleshooting";
+    }
+
+    if (topTokens.includes("tab") && topTokens.includes("sort")) {
+      return "Tab Sorting Research";
+    }
+
+    if (topTokens.includes("zen") && topTokens.includes("browser")) {
+      return "Zen Browser Research";
+    }
+
+    if (profile.primaryHost === "github.com" && profile.categoryCounts.has("research")) {
+      return sanitizeTopicName(
+        `${toTitleCase(topTokens.slice(0, 2).join(" "))} Research`,
+        "GitHub Research"
+      );
+    }
+
+    if (profile.categoryCounts.has("research")) {
+      return sanitizeTopicName(
+        `${toTitleCase(topTokens.slice(0, 2).join(" "))} Research`,
+        "Research"
+      );
+    }
+
+    if (topTokens.length >= 2) {
+      return sanitizeTopicName(topTokens.slice(0, 2).join(" "), "Others");
+    }
+
+    if (topTokens.length === 1) {
+      return sanitizeTopicName(topTokens[0], "Others");
+    }
+
+    return TASK_GROUP_CONFIG.OTHERS_GROUP_NAME;
+  };
+
+  const buildTaskFirstGroups = (
+    assignments,
+    sortableTabs,
+    lockedExistingNames = new Set()
+  ) => {
+    const assignmentMap = new Map();
+    const assignedTabs = new Set();
+
+    assignments.forEach(({ tab, topic }) => {
+      if (!tab?.isConnected || !topic) return;
+      if (!assignmentMap.has(topic)) {
+        assignmentMap.set(topic, []);
+      }
+      assignmentMap.get(topic).push(tab);
+      assignedTabs.add(tab);
+    });
+
+    const initialProfiles = Array.from(assignmentMap.entries()).map(([topic, tabs]) =>
+      buildTaskGroupProfile(topic, uniqueArray(tabs), lockedExistingNames)
+    );
+
+    const buckets = [];
+    initialProfiles
+      .sort((a, b) => b.tabs.length - a.tabs.length)
+      .forEach((profile) => {
+        if (profile.isLockedExisting) {
+          buckets.push(profile);
+          return;
+        }
+
+        let bestBucketIndex = -1;
+        let bestScore = 0;
+
+        buckets.forEach((bucket, index) => {
+          const similarity = calculateTaskGroupSimilarity(profile, bucket);
+          if (similarity > bestScore) {
+            bestScore = similarity;
+            bestBucketIndex = index;
+          }
+        });
+
+        if (bestBucketIndex !== -1 && bestScore >= TASK_GROUP_CONFIG.MERGE_THRESHOLD) {
+          buckets[bestBucketIndex] = mergeTaskGroupProfiles(
+            buckets[bestBucketIndex],
+            profile
+          );
+        } else {
+          buckets.push(profile);
+        }
+      });
+
+    const finalGroups = {};
+    const othersTabs = sortableTabs.filter((tab) => !assignedTabs.has(tab));
+
+    buckets.forEach((bucket) => {
+      const uniqueTabs = uniqueArray(bucket.tabs);
+      if (uniqueTabs.length === 0) {
+        return;
+      }
+
+      if (bucket.isLockedExisting) {
+        finalGroups[bucket.sourceName] = uniqueTabs;
+        return;
+      }
+
+      if (uniqueTabs.length < TASK_GROUP_CONFIG.MIN_NAMED_GROUP_SIZE) {
+        othersTabs.push(...uniqueTabs);
+        return;
+      }
+
+      const inferredName = inferTaskGroupName(
+        buildTaskGroupProfile(bucket.sourceName, uniqueTabs, lockedExistingNames)
+      );
+      const finalName =
+        inferredName === TASK_GROUP_CONFIG.OTHERS_GROUP_NAME
+          ? TASK_GROUP_CONFIG.OTHERS_GROUP_NAME
+          : inferredName;
+
+      if (!finalGroups[finalName]) {
+        finalGroups[finalName] = [];
+      }
+      finalGroups[finalName].push(...uniqueTabs);
+    });
+
+    if (othersTabs.length > 0) {
+      finalGroups[TASK_GROUP_CONFIG.OTHERS_GROUP_NAME] = uniqueArray(othersTabs);
+    }
+
+    Object.keys(finalGroups).forEach((groupName) => {
+      finalGroups[groupName] = uniqueArray(finalGroups[groupName]);
+    });
+
+    return finalGroups;
   };
 
   const toTitleCase = (str) => {
@@ -557,10 +972,13 @@
 
     return [
       "Group browser tabs by browsing task or topic.",
+      "Prefer broad task-oriented groups over narrow repo-name or page-name groups.",
       "Prefer assigning related tabs to an existing group when it is a good fit.",
-      "Create concise title-case group names with at most 24 characters.",
-      "Only include tabs that should be grouped. Omit tabs that should remain ungrouped.",
-      "Favor useful broader grouping over leaving obviously related tabs out.",
+      "Use concise title-case task names with at most 24 characters.",
+      "Do not create singleton niche groups. Put weak, isolated, or miscellaneous tabs into Others.",
+      "Favor useful work-context grouping over literal title similarity.",
+      'Return only valid JSON with this exact shape: {"assignments":[{"tabId":"t1","topic":"Example"}]}.',
+      "Do not include markdown fences, prose, explanations, or extra keys.",
       "",
       "Existing groups:",
       existingGroupsText,
@@ -582,45 +1000,6 @@
   const stripCodeFences = (text) => {
     if (!text || typeof text !== "string") return "";
     return text.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/i, "").trim();
-  };
-
-  const GEMINI_ASSIGNMENTS_SCHEMA = {
-    type: "object",
-    properties: {
-      assignments: {
-        type: "array",
-        items: {
-          type: "object",
-          properties: {
-            tabId: { type: "string" },
-            topic: { type: "string" },
-          },
-          required: ["tabId", "topic"],
-        },
-      },
-    },
-    required: ["assignments"],
-  };
-
-  const toGeminiSchema = (schema) => {
-    if (Array.isArray(schema)) {
-      return schema.map((item) => toGeminiSchema(item));
-    }
-
-    if (!schema || typeof schema !== "object") {
-      return schema;
-    }
-
-    const converted = {};
-    for (const [key, value] of Object.entries(schema)) {
-      if (key === "type" && typeof value === "string") {
-        converted[key] = value.toUpperCase();
-      } else {
-        converted[key] = toGeminiSchema(value);
-      }
-    }
-
-    return converted;
   };
 
   const requestGeminiAssignments = async (prompt, apiKey) => {
@@ -648,13 +1027,6 @@
             generationConfig: {
               temperature: 0.2,
               maxOutputTokens: GEMINI_CONFIG.MAX_OUTPUT_TOKENS,
-              responseFormat: [
-                {
-                  type: "text",
-                  mimeType: "application/json",
-                  schema: toGeminiSchema(GEMINI_ASSIGNMENTS_SCHEMA),
-                },
-              ],
             },
           }),
           signal: controller.signal,
@@ -1314,20 +1686,13 @@
       );
       // --- End AI Grouping ---
 
-      // --- Create Final Groups ---
-      const finalGroups = {};
-      aiTabTopics.forEach(({ tab, topic }) => {
-        if (!topic || topic === "Uncategorized" || !tab || !tab.isConnected) {
-          return;
-        }
-        if (!finalGroups[topic]) {
-          finalGroups[topic] = [];
-        }
-        finalGroups[topic].push(tab);
-      });
-
-      // Single-tab groups are already filtered out at the clustering level
-      // --- End Create Final Groups ---
+      // --- Create Task-First Final Groups ---
+      const finalGroups = buildTaskFirstGroups(
+        aiTabTopics,
+        initialTabsToSort,
+        allExistingGroupNames
+      );
+      // --- End Create Task-First Final Groups ---
 
       // --- Consolidate Similar Category Names ---
       const originalKeys = Object.keys(finalGroups);
@@ -1398,20 +1763,25 @@
       // Success criteria:
       // 1. Created groups with multiple tabs, OR
       // 2. Successfully matched tabs to existing groups (even single tabs)
-      const multiTabGroups = Object.values(finalGroups).filter(
-        (tabs) => tabs.length > 1
+      const multiTabGroups = Object.entries(finalGroups).filter(
+        ([topic, tabs]) =>
+          topic !== TASK_GROUP_CONFIG.OTHERS_GROUP_NAME && tabs.length > 1
       );
+      const othersGroupSize =
+        finalGroups[TASK_GROUP_CONFIG.OTHERS_GROUP_NAME]?.length || 0;
       
-      // Count tabs that were successfully matched to existing groups
-      const tabsMatchedToExistingGroups = aiTabTopics.length;
+      // Count tabs that were successfully assigned by the provider
+      const assignedTabsCount = aiTabTopics.length;
       
       // Sorting is successful if:
-      // - We created new multi-tab groups, OR
-      // - We matched tabs to existing groups, OR  
+      // - We created meaningful named groups, OR
+      // - We assigned tabs to task groups, OR
+      // - We collected leftovers into Others, OR
       // - We only had 1 tab to sort (no failure for single tabs)
       const sortingFailed = 
         multiTabGroups.length === 0 && 
-        tabsMatchedToExistingGroups === 0 && 
+        assignedTabsCount === 0 &&
+        othersGroupSize === 0 &&
         initialTabsToSort.length > 1;
 
       console.log(
@@ -1420,14 +1790,15 @@
       );
       console.log("[TabSort] Debug - Final groups:", Object.keys(finalGroups));
       console.log("[TabSort] Debug - Multi-tab groups:", multiTabGroups.length);
-      console.log("[TabSort] Debug - Tabs matched to existing groups:", tabsMatchedToExistingGroups);
+      console.log("[TabSort] Debug - Assigned tabs count:", assignedTabsCount);
+      console.log("[TabSort] Debug - Others group size:", othersGroupSize);
       console.log(
         "[TabSort] Debug - multiTabGroups.length === 0:",
         multiTabGroups.length === 0
       );
       console.log(
-        "[TabSort] Debug - tabsMatchedToExistingGroups === 0:",
-        tabsMatchedToExistingGroups === 0
+        "[TabSort] Debug - assignedTabsCount === 0:",
+        assignedTabsCount === 0
       );
       console.log(
         "[TabSort] Debug - initialTabsToSort.length > 1:",

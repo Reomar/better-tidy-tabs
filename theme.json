@@ -1,7 +1,7 @@
 {
-  "id": "zen-tidy-tabs",
-  "name": "Zen Tidy Tabs",
-  "description": "Sort your tabs using Firefox's local AI but make it look awesome!",
+  "id": "better-tidy-tabs",
+  "name": "Better Tidy Tabs",
+  "description": "Sort Zen tabs by task with Firefox local AI or optional Gemini fallback.",
   "scripts": {
     "tidy-tabs.uc.js": {
       "include": [
@@ -9,17 +9,17 @@
       ]
     }
   },
-  "homepage": "https://github.com/Vertex-Mods/Zen-Tidy-Tabs",
+  "homepage": "https://github.com/Reomar/better-tidy-tabs",
   "style": {
     "chrome": "userChrome.css"
   },
   "preferences": "preferences.json",
-  "readme": "https://raw.githubusercontent.com/Vertex-Mods/Zen-Tidy-Tabs/main/README.md",
-  "image": "https://raw.githubusercontent.com/Vertex-Mods/Zen-Tidy-Tabs/main/image.png",
-  "author": "Vertex",
-  "version": "1.2.0s",
+  "readme": "https://raw.githubusercontent.com/Reomar/better-tidy-tabs/main/README.md",
+  "image": "https://raw.githubusercontent.com/Reomar/better-tidy-tabs/main/image.png",
+  "author": "Reomar",
+  "version": "1.3.0",
   "tags": [
-    "Vertex",
+    "Fork",
     "Zen Browser",
     "Vertical Tabs",
     "Tab Groups",
@@ -30,7 +30,7 @@
     "12th"
   ],
   "createdAt": "2025-09-20",
-  "updatedAt": "2026-02-01 08:20",
+  "updatedAt": "2026-06-26 00:00",
   "modules": ["Vertex-Mods/Advanced-Tab-Groups"],
   "ai": "yes",
   "fork": ["zen"]
