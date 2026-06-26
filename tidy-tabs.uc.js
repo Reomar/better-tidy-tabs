@@ -15,6 +15,7 @@
     INIT_CHECK_INTERVAL: 100,
     CONSOLIDATION_DISTANCE_THRESHOLD: 2,
     EMBEDDING_BATCH_SIZE: 5,
+    MAX_EMBEDDING_CACHE_SIZE: 250,
     EXISTING_GROUP_BOOST: 0.1, // Boost similarity score for existing groups to prefer them
   };
 
@@ -24,6 +25,7 @@
   let isPlayingFailureAnimation = false;
   let sortAnimationId = null;
   let eventListenersAdded = false;
+  const embeddingCache = new Map();
 
   // DOM Cache for performance
   const domCache = {
@@ -308,11 +310,53 @@
     for (let i = 0; i < tabs.length; i += batchSize) {
       const batch = tabs.slice(i, i + batchSize);
       const batchResults = await Promise.all(
-        batch.map((tab) => generateEmbedding(getTabTitle(tab)))
+        batch.map((tab) => getCachedEmbeddingForTab(tab))
       );
       results.push(...batchResults);
     }
     return results;
+  };
+
+  const getEmbeddingCacheKey = (title) => {
+    if (!title || typeof title !== "string") return null;
+    const normalizedTitle = title.trim();
+    return normalizedTitle || null;
+  };
+
+  const cacheEmbedding = (key, embedding) => {
+    if (!key || !Array.isArray(embedding) || embedding.length === 0) return;
+
+    if (embeddingCache.has(key)) {
+      embeddingCache.delete(key);
+    }
+
+    embeddingCache.set(key, embedding);
+
+    if (embeddingCache.size > CONFIG.MAX_EMBEDDING_CACHE_SIZE) {
+      const oldestKey = embeddingCache.keys().next().value;
+      if (oldestKey) {
+        embeddingCache.delete(oldestKey);
+      }
+    }
+  };
+
+  const getCachedEmbeddingForTab = async (tab) => {
+    const title = getTabTitle(tab);
+    const cacheKey = getEmbeddingCacheKey(title);
+
+    if (cacheKey && embeddingCache.has(cacheKey)) {
+      const cachedEmbedding = embeddingCache.get(cacheKey);
+      embeddingCache.delete(cacheKey);
+      embeddingCache.set(cacheKey, cachedEmbedding);
+      return cachedEmbedding;
+    }
+
+    const embedding = await generateEmbedding(title);
+    if (cacheKey && Array.isArray(embedding) && embedding.length > 0) {
+      cacheEmbedding(cacheKey, embedding);
+    }
+
+    return embedding;
   };
 
   const generateEmbedding = async (title) => {
@@ -1776,6 +1820,7 @@
 
       // Clear DOM cache
       domCache.invalidate();
+      embeddingCache.clear();
 
       // Reset state
       isSorting = false;
