@@ -2,7 +2,7 @@
 
 `Better Tidy Tabs` is a fork of [Vertex-Mods/Zen-Tidy-Tabs](https://github.com/Vertex-Mods/Zen-Tidy-Tabs) for Zen Browser.
 
-This version keeps the original sidebar integration, but changes the sorter so the AI decides the final groups instead of the extension trying to "fix" them afterward.
+This fork keeps the original Zen sidebar integration from upstream, but changes the grouping pipeline and provider options.
 
 ## What It Does
 
@@ -15,9 +15,42 @@ When you click the brush icon in Zen's vertical tabs sidebar, the mod:
 
 The goal is simple: let the model group tabs by what you are actually doing, not by tiny title fragments.
 
+## What Comes From Upstream
+
+These parts were already present in `Vertex-Mods/Zen-Tidy-Tabs` before this fork started:
+
+- the brush button and separator UI in Zen's vertical tabs sidebar
+- Firefox local AI tab sorting
+- support for creating groups and moving tabs into existing groups
+- tab reordering after sorting
+- failure animation
+- clear-button patching so grouped tabs are not wiped accidentally
+- Sine / Advanced Tab Groups packaging and integration
+
+## What This Fork Changes
+
+Compared with the upstream commit this fork started from, `better-tidy-tabs` adds:
+
+- `Gemini` as an optional second provider in settings
+- a Gemini API key field in Sine settings
+- cached local embeddings so repeated Firefox-local sorts do less repeated ML work
+- a stronger Gemini request path with:
+  - structured JSON output attempts
+  - dynamic output token sizing
+  - model fallback chain
+  - fallback to Firefox local AI if Gemini is unavailable
+- AI-owned grouping:
+  - the model decides the final groups
+  - local token-normalization and heuristic merge logic have been removed
+  - existing groups are reused only when the provider intentionally returns that exact group name
+- updated fork metadata, repo identity, and Sine import URL
+
 ## Why This Fork Exists
 
-The upstream idea was solid, but the local post-processing could still split work into too many tiny groups. This fork moves more of that decision-making into the AI itself so the result is closer to your actual task.
+The upstream mod already worked, but this fork is focused on two practical changes:
+
+- giving users a cloud-model option when Firefox local AI is not enough
+- reducing local post-processing so the provider's grouping decision is not silently rewritten afterward
 
 ## Install In Sine Mods
 
