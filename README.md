@@ -9,10 +9,6 @@
   Smarter AI grouping, cloud model choice, faster repeat sorting, and cleaner tab organization for Zen Browser.
 </p>
 
-<p align="center">
-  <a href="https://github.com/Reomar/better-tidy-tabs">Install from GitHub</a>
-</p>
-
 ## Why Better Tidy Tabs
 
 `Better Tidy Tabs` is built for people who keep a lot of tabs open and want their Zen sidebar to stay usable.
