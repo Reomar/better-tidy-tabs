@@ -170,7 +170,7 @@
   min-height: 18px !important;
 }
 
-#vertical-pinned-tabs-container
+:is(#vertical-pinned-tabs-container, #zen-essentials)
   .zen-workspace-tabs-section[hide-separator]
   .pinned-tabs-container-separator {
   max-height: 0 !important;
@@ -181,7 +181,19 @@
   gap: 0 !important;
 }
 
-.vertical-pinned-tabs-container-separator:hover svg {
+/* Zen collapses the native separator when it has no visible tabs.
+   Keep it open only when sorting is available. */
+:is(#vertical-pinned-tabs-container, #zen-essentials)
+  .zen-workspace-tabs-section[hide-separator]
+  .pinned-tabs-container-separator:has(#sort-button:not(.hidden-button)) {
+  height: 22px !important;
+  min-height: 22px !important;
+  max-height: 22px !important;
+  opacity: 1 !important;
+  overflow: visible !important;
+}
+
+.pinned-tabs-container-separator:hover svg {
   width: calc(
     100% -
       (
