@@ -146,6 +146,14 @@
     }
   }
 
+  /* Keep the sort action discoverable whenever runtime tab checks expose it. */
+  & #sort-button:not(.hidden-button) {
+    visibility: visible !important;
+    opacity: 0.65 !important;
+    pointer-events: auto !important;
+    cursor: pointer !important;
+  }
+
   &.has-no-sortable-tabs {
     max-height: 0 !important;
     margin: 0 auto !important;
