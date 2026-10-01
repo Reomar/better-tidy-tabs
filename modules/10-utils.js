@@ -3,6 +3,58 @@
   const ns = window.BetterTidyTabs;
   const { CLOUD_PROMPT_CONFIG, ATG_ICON_CATALOG, ATG_ICON_KEYWORDS } = ns;
 
+  // Resolve the active workspace id even when Zen internals change shape.
+  const getActiveWorkspaceId = () => {
+    const preferredWorkspaceId = window.gZenWorkspaces?.activeWorkspace;
+    if (preferredWorkspaceId) {
+      return preferredWorkspaceId;
+    }
+
+    const selectedTabWorkspaceId =
+      window.gBrowser?.selectedTab?.getAttribute?.("zen-workspace-id") || "";
+    if (selectedTabWorkspaceId) {
+      return selectedTabWorkspaceId;
+    }
+
+    const activeTab = Array.from(window.gBrowser?.tabs || []).find(
+      (tab) => tab?.selected && tab?.isConnected
+    );
+    return activeTab?.getAttribute?.("zen-workspace-id") || "";
+  };
+
+  // Resolve the active workspace element with fallbacks for newer Zen builds.
+  const getActiveWorkspaceElement = () => {
+    const preferredElement = window.gZenWorkspaces?.activeWorkspaceElement;
+    if (preferredElement?.isConnected) {
+      return preferredElement;
+    }
+
+    const workspaceId = getActiveWorkspaceId();
+    if (workspaceId) {
+      const matchingElement = document.querySelector(
+        [
+          `.zen-workspace-tabs-section[zen-workspace-id="${workspaceId}"]`,
+          `.zen-workspace-tabs-section[data-workspace-id="${workspaceId}"]`,
+          `.zen-workspace-tabs-section[id="${workspaceId}"]`,
+        ].join(", ")
+      );
+      if (matchingElement?.isConnected) {
+        return matchingElement;
+      }
+    }
+
+    return (
+      document.querySelector(
+        [
+          ".zen-workspace-tabs-section[selected]",
+          ".zen-workspace-tabs-section[active]",
+          '.zen-workspace-tabs-section[data-active="true"]',
+          ".zen-workspace-tabs-section:not([hidden])",
+        ].join(", ")
+      ) || null
+    );
+  };
+
   // Return tabs from the active workspace that match the requested filters.
   const getFilteredTabs = (workspaceId, options = {}) => {
     if (!workspaceId || typeof gBrowser === "undefined" || !gBrowser.tabs) {
@@ -331,6 +383,8 @@
   };
 
   Object.assign(ns, {
+    getActiveWorkspaceId,
+    getActiveWorkspaceElement,
     getFilteredTabs,
     getTabTitle,
     getTabNavigationInfo,

@@ -5,6 +5,8 @@
   const {
     batchDOMUpdates,
     cleanupAnimation,
+    getActiveWorkspaceElement,
+    getActiveWorkspaceId,
     getFilteredTabs,
     sortTabsByTopic,
   } = ns;
@@ -44,7 +46,7 @@
           <toolbarbutton
             id="sort-button"
             class="sort-button-with-icon"
-            command="cmd_zenSortTabs"
+            data-better-tidy-tabs="sort-button"
             tooltiptext="Sort Tabs into Groups by Topic (AI)">
             <hbox class="toolbarbutton-box" align="center">
               <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 28 28" class="broom-icon">
@@ -69,19 +71,79 @@
     }
   }
 
-  // Inject the sort button into every visible separator and refresh visibility.
-  function addSortButtonToAllSeparators() {
+  // Create a fallback host when Zen no longer renders the separator wrapper.
+  function ensureGeneratedSeparator(container) {
+    if (!container?.isConnected) {
+      return null;
+    }
+
+    const existing = container.querySelector(".better-tidy-tabs-generated-separator");
+    if (existing) {
+      return existing;
+    }
+
+    const separator = document.createXULElement?.("hbox") || document.createElement("div");
+    separator.className = "pinned-tabs-container-separator better-tidy-tabs-generated-separator";
+    separator.setAttribute?.("align", "center");
+    separator.setAttribute?.("orient", "horizontal");
+
+    const nativeClearButton = container.querySelector(
+      ".zen-workspace-close-unpinned-tabs-button"
+    );
+    if (nativeClearButton?.parentElement === container) {
+      container.insertBefore(separator, nativeClearButton);
+    } else {
+      container.appendChild(separator);
+    }
+
+    return separator;
+  }
+
+  // Resolve the best available DOM hosts for the sort button in current Zen builds.
+  function getSortHostTargets() {
     domCache.invalidate();
 
-    const separators = Array.from(domCache.getSeparators());
+    const explicitSeparators = Array.from(domCache.getSeparators()).filter(
+      (separator) => separator?.isConnected
+    );
+    if (explicitSeparators.length > 0) {
+      return explicitSeparators;
+    }
+
+    const nativeClearButton = document.querySelector(
+      ".zen-workspace-close-unpinned-tabs-button"
+    );
+    if (nativeClearButton?.parentElement?.isConnected) {
+      return [ensureGeneratedSeparator(nativeClearButton.parentElement)].filter(Boolean);
+    }
+
+    const pinnedTabsContainer =
+      gBrowser?.tabContainer?.pinnedTabsContainer ||
+      window.gZenWorkspaces?.pinnedTabsContainer ||
+      document.getElementById("pinned-tabs-container");
+    if (pinnedTabsContainer?.isConnected) {
+      return [ensureGeneratedSeparator(pinnedTabsContainer)].filter(Boolean);
+    }
+
+    const periphery =
+      document.getElementById("pinned-tabs-container-periphery") ||
+      document.getElementById("tabbrowser-arrowscrollbox-periphery");
+    if (periphery?.isConnected) {
+      return [ensureGeneratedSeparator(periphery)].filter(Boolean);
+    }
+
+    return [];
+  }
+
+  // Inject the sort button into every visible separator and refresh visibility.
+  function addSortButtonToAllSeparators() {
+    const separators = getSortHostTargets();
     if (separators.length > 0) {
       separators.forEach(ensureSortButtonExists);
+      console.log(`[TabSort] Prepared ${separators.length} sort host target(s).`);
       updateButtonsVisibilityState();
     } else {
-      const periphery = document.querySelector("#tabbrowser-arrowscrollbox-periphery");
-      if (periphery && !periphery.querySelector("#sort-button")) {
-        ensureSortButtonExists(periphery);
-      }
+      console.warn("[TabSort] No sort host target found in current Zen layout.");
     }
 
     updateButtonsVisibilityState();
@@ -223,12 +285,39 @@
     state.sortAnimationId = requestAnimationFrame(animateWaveLoop);
   };
 
-  // Create the command and bind the global sort button event listener once.
+  // Trigger one end-to-end sort action from a clicked sidebar button.
+  const triggerSortFromButton = (sortButton) => {
+    if (!sortButton?.isConnected) {
+      sortTabsByTopic();
+      return;
+    }
+
+    sortButton.classList.add("brushing");
+    setTimeout(() => {
+      if (sortButton?.isConnected) {
+        sortButton.classList.remove("brushing");
+      }
+    }, CONFIG.ANIMATION_DURATION);
+
+    if (state.sortAnimationId !== null) return;
+
+    const separator = sortButton.closest(
+      `:is(${ns.SELECTORS.SEPARATORS})`
+    );
+    if (!separator) {
+      sortTabsByTopic();
+      return;
+    }
+
+    startSortWaveAnimation(separator);
+    sortTabsByTopic();
+  };
+
+  // Create the optional command and bind click listeners once.
   function setupSortCommandAndListener() {
     const zenCommands = domCache.getCommandSet();
-    if (!zenCommands) return;
 
-    if (!zenCommands.querySelector("#cmd_zenSortTabs")) {
+    if (zenCommands && !zenCommands.querySelector("#cmd_zenSortTabs")) {
       try {
         const command = window.MozXULElement.parseXULToFragment(
           `<command id="cmd_zenSortTabs"/>`
@@ -240,38 +329,40 @@
     }
 
     if (!state.sortButtonListenerAdded) {
-      state.commandHandler = (event) => {
-        if (event.target.id !== "cmd_zenSortTabs") {
+      state.clickHandler = (event) => {
+        if (event.type === "click" && event.button !== 0) {
           return;
         }
 
-        const activeWorkspace = window.gZenWorkspaces?.activeWorkspaceElement;
-        const separator = activeWorkspace?.querySelector(
-          ".pinned-tabs-container-separator:not(.has-no-sortable-tabs)"
-        );
-
-        const sortButton = separator?.querySelector("#sort-button");
-        if (sortButton) {
-          sortButton.classList.add("brushing");
-          setTimeout(() => {
-            if (sortButton?.isConnected) {
-              sortButton.classList.remove("brushing");
-            }
-          }, CONFIG.ANIMATION_DURATION);
-        }
-
-        if (state.sortAnimationId !== null) return;
-
-        if (!separator) {
-          sortTabsByTopic();
+        const sortButton =
+          event.target?.closest?.("#sort-button") ||
+          (event.target?.id === "sort-button" ? event.target : null);
+        if (!sortButton) {
           return;
         }
 
-        startSortWaveAnimation(separator);
-        sortTabsByTopic();
+        event.preventDefault();
+        event.stopPropagation();
+        triggerSortFromButton(sortButton);
       };
 
-      zenCommands.addEventListener("command", state.commandHandler);
+      state.commandHandler = (event) => {
+        if (event.target?.id !== "cmd_zenSortTabs") {
+          return;
+        }
+
+        const activeWorkspace = getActiveWorkspaceElement();
+        const separator = activeWorkspace?.querySelector(
+          `:is(${ns.SELECTORS.SEPARATORS}):not(.has-no-sortable-tabs)`
+        );
+        const sortButton = separator?.querySelector("#sort-button");
+        triggerSortFromButton(sortButton);
+      };
+
+      document.addEventListener("click", state.clickHandler, true);
+      if (zenCommands) {
+        zenCommands.addEventListener("command", state.commandHandler);
+      }
       state.sortButtonListenerAdded = true;
     }
   }
@@ -327,6 +418,53 @@
     state.workspaceHooksInstalled = true;
   }
 
+  // Watch the sidebar subtree so the sort button comes back after Zen rerenders.
+  function observeSidebarMutations() {
+    if (state.mutationObserver || !document.body) {
+      return;
+    }
+
+    const sortHostCandidates = [
+      ns.SELECTORS.SEPARATORS,
+      ".zen-workspace-tabs-section",
+      ".zen-workspace-close-unpinned-tabs-button",
+      "#pinned-tabs-container",
+      "#pinned-tabs-container-periphery",
+      "#tabbrowser-arrowscrollbox-periphery",
+    ].join(", ");
+    const nodeContainsSortHost = (node) =>
+      node?.nodeType === Node.ELEMENT_NODE &&
+      (node.matches?.(sortHostCandidates) ||
+        node.querySelector?.(sortHostCandidates));
+
+    const refreshInjectedUi = debounce(() => {
+      addSortButtonToAllSeparators();
+      updateButtonsVisibilityState();
+    }, CONFIG.DEBOUNCE_DELAY);
+
+    state.mutationObserver = new MutationObserver((mutations) => {
+      const shouldRefresh = mutations.some((mutation) => {
+        if (mutation.type === "attributes") {
+          const target = mutation.target;
+          return nodeContainsSortHost(target);
+        }
+
+        return Array.from(mutation.addedNodes || []).some(nodeContainsSortHost);
+      });
+
+      if (shouldRefresh) {
+        refreshInjectedUi();
+      }
+    });
+
+    state.mutationObserver.observe(document.body, {
+      childList: true,
+      subtree: true,
+      attributes: true,
+      attributeFilter: ["hidden", "selected", "active", "data-active"],
+    });
+  }
+
   // Override Zen's clear action so grouped tabs are preserved.
   function patchClearButtonToPreserveGroups() {
     if (
@@ -338,7 +476,9 @@
 
     const originalCloseAllUnpinnedTabs = window.gZenWorkspaces.closeAllUnpinnedTabs;
     if (typeof originalCloseAllUnpinnedTabs !== "function") {
-      console.warn("[TidyTabs] closeAllUnpinnedTabs method not found");
+      if (state.workspaceIntegrationIntervalId === null) {
+        console.warn("[TidyTabs] closeAllUnpinnedTabs method not found");
+      }
       return;
     }
 
@@ -401,9 +541,39 @@
     state.clearPatchInstalled = true;
   }
 
+  // Retry optional workspace integrations if Zen exposes them after startup.
+  function ensureWorkspaceIntegrations() {
+    setupgZenWorkspacesHooks();
+    patchClearButtonToPreserveGroups();
+
+    const integrationsReady =
+      state.workspaceHooksInstalled && state.clearPatchInstalled;
+    if (integrationsReady && state.workspaceIntegrationIntervalId !== null) {
+      window.clearInterval(state.workspaceIntegrationIntervalId);
+      state.workspaceIntegrationIntervalId = null;
+    }
+
+    return integrationsReady;
+  }
+
+  // Keep checking at low frequency until delayed Zen workspace APIs are ready.
+  function watchWorkspaceIntegrationAvailability() {
+    if (
+      state.workspaceIntegrationIntervalId !== null ||
+      (state.workspaceHooksInstalled && state.clearPatchInstalled)
+    ) {
+      return;
+    }
+
+    state.workspaceIntegrationIntervalId = window.setInterval(
+      ensureWorkspaceIntegrations,
+      1000
+    );
+  }
+
   // Count grouped and ungrouped tabs to decide whether the sort button should show.
   const countTabsForButtonVisibility = () => {
-    const currentWorkspaceId = window.gZenWorkspaces?.activeWorkspace;
+    const currentWorkspaceId = getActiveWorkspaceId();
 
     if (
       !currentWorkspaceId ||
@@ -451,7 +621,7 @@
   // Update the sort button visibility and tooltip for each workspace separator.
   const updateButtonsVisibilityState = () => {
     const { ungroupedTotal, hasGroupedTabs } = countTabsForButtonVisibility();
-    const separators = Array.from(domCache.getSeparators());
+    const separators = getSortHostTargets();
 
     batchDOMUpdates([
       () => {
@@ -523,12 +693,10 @@
       gBrowser.tabContainer.addEventListener(eventName, state.tabEventHandler);
     });
 
-    if (typeof window.gZenWorkspaces !== "undefined") {
-      window.addEventListener(
-        "zen-workspace-switched",
-        state.workspaceSwitchHandler
-      );
-    }
+    window.addEventListener(
+      "zen-workspace-switched",
+      state.workspaceSwitchHandler
+    );
 
     state.eventListenersAdded = true;
   }
@@ -560,9 +728,16 @@
         clearInterval(state.initIntervalId);
         state.initIntervalId = null;
       }
+      if (state.workspaceIntegrationIntervalId !== null) {
+        window.clearInterval(state.workspaceIntegrationIntervalId);
+        state.workspaceIntegrationIntervalId = null;
+      }
 
       if (state.sortButtonListenerAdded && state.commandHandler) {
         domCache.getCommandSet()?.removeEventListener("command", state.commandHandler);
+      }
+      if (state.sortButtonListenerAdded && state.clickHandler) {
+        document.removeEventListener("click", state.clickHandler, true);
       }
 
       if (
@@ -618,6 +793,9 @@
       if (state.beforeUnloadHandler) {
         window.removeEventListener("beforeunload", state.beforeUnloadHandler);
       }
+      if (state.mutationObserver) {
+        state.mutationObserver.disconnect();
+      }
 
       domCache.invalidate();
       state.embeddingCache.clear();
@@ -625,6 +803,7 @@
       state.sortButtonListenerAdded = false;
       state.eventListenersAdded = false;
       state.commandHandler = null;
+      state.clickHandler = null;
       state.tabEventHandler = null;
       state.workspaceSwitchHandler = null;
       state.workspaceHooksInstalled = false;
@@ -634,6 +813,8 @@
       state.loadHandler = null;
       state.unloadHandler = null;
       state.beforeUnloadHandler = null;
+      state.mutationObserver = null;
+      state.workspaceIntegrationIntervalId = null;
       state.initialized = false;
 
       console.log("Tab sort script cleanup completed");
@@ -648,28 +829,22 @@
     const tryInitialize = () => {
       try {
         if (state.initialized) {
+          ensureWorkspaceIntegrations();
+          watchWorkspaceIntegrationAvailability();
           addSortButtonToAllSeparators();
           updateButtonsVisibilityState();
           return true;
         }
 
-        const separatorExists = domCache.getSeparators().length > 0;
-        const commandSetExists = !!domCache.getCommandSet();
         const gBrowserReady =
           typeof gBrowser !== "undefined" && gBrowser?.tabContainer;
-        const gZenWorkspacesReady =
-          typeof window.gZenWorkspaces !== "undefined";
 
-        if (
-          gBrowserReady &&
-          commandSetExists &&
-          separatorExists &&
-          gZenWorkspacesReady
-        ) {
+        if (gBrowserReady && document.body) {
           setupSortCommandAndListener();
+          observeSidebarMutations();
           addSortButtonToAllSeparators();
-          setupgZenWorkspacesHooks();
-          patchClearButtonToPreserveGroups();
+          ensureWorkspaceIntegrations();
+          watchWorkspaceIntegrationAvailability();
           updateButtonsVisibilityState();
           addTabEventListeners();
           state.initialized = true;
@@ -727,10 +902,13 @@
 
   Object.assign(ns, {
     ensureSortButtonExists,
+    ensureGeneratedSeparator,
+    getSortHostTargets,
     addSortButtonToAllSeparators,
     showRuntimeToast,
     setupSortCommandAndListener,
     setupgZenWorkspacesHooks,
+    observeSidebarMutations,
     patchClearButtonToPreserveGroups,
     countTabsForButtonVisibility,
     updateButtonsVisibilityState,

@@ -13,6 +13,12 @@
     MAX_EMBEDDING_CACHE_SIZE: 250,
   };
 
+  ns.SELECTORS = {
+    SEPARATORS:
+      ".pinned-tabs-container-separator, .vertical-pinned-tabs-container-separator, .better-tidy-tabs-generated-separator",
+    COMMAND_SET: "commandset#zenCommandSet",
+  };
+
   ns.PROVIDERS = {
     FIREFOX_LOCAL: "firefox-local",
     GEMINI: "gemini",
@@ -164,11 +170,14 @@
     eventListenersAdded: false,
     embeddingCache: new Map(),
     commandHandler: null,
+    clickHandler: null,
     tabEventHandler: null,
     workspaceSwitchHandler: null,
     loadHandler: null,
     unloadHandler: null,
     beforeUnloadHandler: null,
+    mutationObserver: null,
+    workspaceIntegrationIntervalId: null,
     workspaceHooksInstalled: false,
     workspaceHooksOriginals: null,
     clearPatchInstalled: false,
@@ -197,9 +206,7 @@
     // Cache the separator list until the UI layer invalidates it.
     getSeparators() {
       if (!this.separators || !this.separators.length) {
-        this.separators = document.querySelectorAll(
-          ".pinned-tabs-container-separator"
-        );
+        this.separators = document.querySelectorAll(ns.SELECTORS.SEPARATORS);
       }
       return this.separators;
     },
@@ -207,7 +214,7 @@
     // Cache the Zen commandset used for the sort command binding.
     getCommandSet() {
       if (!this.commandSet) {
-        this.commandSet = document.querySelector("commandset#zenCommandSet");
+        this.commandSet = document.querySelector(ns.SELECTORS.COMMAND_SET);
       }
       return this.commandSet;
     },

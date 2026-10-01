@@ -7,6 +7,8 @@
     buildProviderContext,
     consumeProviderFeedback,
     formatProviderLabel,
+    getActiveWorkspaceElement,
+    getActiveWorkspaceId,
     getPreferredAIProvider,
     getFilteredTabs,
     normalizeTopicKey,
@@ -18,11 +20,15 @@
 
   // Route tab grouping through the selected provider and fall back to local AI.
   const askAIForMultipleTopics = async (tabs) => {
+    // Build one provider-neutral snapshot so every provider sees the same tabs
+    // and existing-group context.
     const context = buildProviderContext(tabs);
     if (context.tabs.length === 0) {
       return [];
     }
 
+    // Local AI is required because it is the final fallback for unavailable or
+    // failed cloud providers.
     const localProvider = ns.getProvider(PROVIDERS.FIREFOX_LOCAL);
     if (!localProvider) {
       console.error("[TabSort] Local provider is not registered.");
@@ -37,6 +43,8 @@
       let feedback = null;
 
       try {
+        // A cloud provider returning null means it is unavailable; an array is
+        // authoritative, even when it intentionally leaves tabs unassigned.
         cloudAssignments = await preferredProvider.assignTopics(context);
       } catch (error) {
         console.error(
@@ -59,6 +67,8 @@
         return cloudAssignments;
       }
 
+      // Providers can publish a user-facing failure message without throwing.
+      // Consume it before falling back so the UI does not fail silently.
       feedback ||= consumeProviderFeedback();
       if (
         feedback?.message &&
@@ -90,10 +100,18 @@
       state.sortAnimationId = null;
 
       try {
-        const activeWorkspace = window.gZenWorkspaces?.activeWorkspaceElement;
-        const activeSeparator = activeWorkspace?.querySelector(
-          ".pinned-tabs-container-separator:not(.has-no-sortable-tabs)"
-        );
+        const activeWorkspace = getActiveWorkspaceElement();
+        // Zen can recreate separators outside the active workspace. Prefer the
+        // active workspace, then use any connected sort host as a safe fallback.
+        const activeSeparator =
+          activeWorkspace?.querySelector(
+            `:is(${ns.SELECTORS.SEPARATORS}):not(.has-no-sortable-tabs)`
+          ) ||
+          ns.getSortHostTargets?.().find(
+            (separator) =>
+              separator?.isConnected &&
+              !separator.classList.contains("has-no-sortable-tabs")
+          );
         const pathElement = activeSeparator?.querySelector("#separator-path");
         if (pathElement) {
           pathElement.setAttribute("d", "M 0 1 L 100 1");
@@ -113,13 +131,23 @@
     state.isPlayingFailureAnimation = true;
 
     try {
-      const activeWorkspace = window.gZenWorkspaces?.activeWorkspaceElement;
-      const activeSeparator = activeWorkspace?.querySelector(
-        ".pinned-tabs-container-separator:not(.has-no-sortable-tabs)"
-      );
+      const activeWorkspace = getActiveWorkspaceElement();
+      // Resolve the live separator at animation time because Zen may have
+      // rerendered the sidebar since sorting started.
+      const activeSeparator =
+        activeWorkspace?.querySelector(
+          `:is(${ns.SELECTORS.SEPARATORS}):not(.has-no-sortable-tabs)`
+        ) ||
+        ns.getSortHostTargets?.().find(
+          (separator) =>
+            separator?.isConnected &&
+            !separator.classList.contains("has-no-sortable-tabs")
+        );
       const pathElement = activeSeparator?.querySelector("#separator-path");
 
       if (pathElement) {
+        // These values produce three short, visible pulses instead of a
+        // persistent error state on the separator.
         const maxAmplitude = 8;
         const frequency = 20;
         const segments = 100;
@@ -184,6 +212,8 @@
 
   // Remove temporary sorting classes after a sort or failure animation completes.
   const clearSortingIndicators = (separatorsToSort) => {
+    // Remove the separator state immediately, but keep tab highlighting long
+    // enough for the completion animation to be perceptible.
     if (separatorsToSort.length > 0) {
       batchDOMUpdates([
         () =>
@@ -222,6 +252,8 @@
     const groups = [];
     const ungroupedTabs = [];
 
+    // Only direct children are considered here; nested tabs belong to their
+    // group and must not be moved independently.
     for (const child of allChildren) {
       const tagName = child.tagName?.toLowerCase();
       if (tagName === "tab-group") {
@@ -242,6 +274,8 @@
     const lastGroup = groups[groups.length - 1];
     let insertAfterElement = lastGroup;
 
+    // Insert loose tabs after the final group while preserving their current
+    // relative order.
     ungroupedTabs.forEach((tab) => {
       if (tab.isConnected && insertAfterElement?.isConnected) {
         const nextSibling = insertAfterElement.nextSibling;
@@ -263,7 +297,8 @@
     let separatorsToSort = [];
 
     try {
-      separatorsToSort = Array.from(domCache.getSeparators());
+      separatorsToSort =
+        ns.getSortHostTargets?.() || Array.from(domCache.getSeparators());
       if (separatorsToSort.length > 0) {
         batchDOMUpdates([
           () =>
@@ -275,7 +310,7 @@
         ]);
       }
 
-      const currentWorkspaceId = window.gZenWorkspaces?.activeWorkspace;
+      const currentWorkspaceId = getActiveWorkspaceId();
       if (!currentWorkspaceId) {
         console.error("Cannot get current workspace ID.");
         return;
@@ -284,6 +319,8 @@
       const existingGroupNameMap = new Map();
       const groupSelector = `tab-group:has(tab[zen-workspace-id="${currentWorkspaceId}"])`;
 
+      // Normalize only for lookup. The original label is retained so provider
+      // output can reuse the exact spelling/casing already shown in the UI.
       document.querySelectorAll(groupSelector).forEach((groupEl) => {
         const label = groupEl.getAttribute("label");
         if (label) {
@@ -298,6 +335,8 @@
         includeEmpty: false,
         includeGlance: false,
       }).filter((tab) => {
+        // Exclude tabs already inside a group in this workspace. This keeps the
+        // sort operation additive and avoids moving existing grouped tabs.
         const groupParent = tab.closest("tab-group");
         const isInGroupInCorrectWorkspace = groupParent
           ? groupParent.matches(groupSelector)
@@ -309,6 +348,8 @@
         return;
       }
 
+      // Provider assignments are converted into final group buckets while
+      // preserving the provider's topic decisions.
       const aiTabTopics = (await askAIForMultipleTopics(initialTabsToSort)) || [];
       const finalGroups = buildFinalGroupsFromAssignments(
         aiTabTopics,
@@ -319,6 +360,8 @@
       const sortingFailed =
         assignedTabsCount === 0 && initialTabsToSort.length > 1;
 
+      // A single unassigned tab is not treated as a failure; there is no useful
+      // group to create for it. Multiple unassigned tabs get visible feedback.
       if (sortingFailed) {
         startFailureAnimation();
         return;
@@ -329,6 +372,8 @@
       }
 
       const existingGroupElementsMap = new Map();
+      // Store actual elements separately from normalized names because the DOM
+      // lookup needs the provider-selected label used by finalGroups.
       document.querySelectorAll(groupSelector).forEach((groupEl) => {
         const label = groupEl.getAttribute("label");
         if (label) {
@@ -338,6 +383,8 @@
 
       for (const topic in finalGroups) {
         const groupData = finalGroups[topic];
+        // A tab may have changed groups while the provider request was running;
+        // re-check connectivity and workspace membership before moving it.
         const tabsForThisTopic = groupData.tabs.filter((tab) => {
           const groupParent = tab.closest("tab-group");
           const isInGroupInCorrectWorkspace = groupParent
@@ -354,6 +401,8 @@
 
         if (existingGroupElement && existingGroupElement.isConnected) {
           try {
+            // Reusing a collapsed group should reveal it so the newly assigned
+            // tabs are immediately visible to the user.
             if (existingGroupElement.getAttribute("collapsed") === "true") {
               existingGroupElement.setAttribute("collapsed", "false");
               const groupLabelElement =
@@ -399,6 +448,8 @@
         };
 
         try {
+          // Insert the new group at the first assigned tab so the workspace
+          // keeps a stable, predictable position after grouping.
           const newGroup = gBrowser.addTabGroup(tabsForThisTopic, groupOptions);
           if (newGroup && newGroup.isConnected) {
             existingGroupElementsMap.set(topic, newGroup);
@@ -413,6 +464,8 @@
 
             await applyATGGroupIconIfNeeded(newGroup, groupData.iconId);
           } else {
+            // Some Zen/ATG versions do not return the created element even when
+            // creation succeeds, so recover it from the workspace DOM.
             const newGroupElFallback = findGroupElement(topic, currentWorkspaceId);
             if (newGroupElFallback && newGroupElFallback.isConnected) {
               existingGroupElementsMap.set(topic, newGroupElFallback);
@@ -443,6 +496,8 @@
 
           const groupAfterError = findGroupElement(topic, currentWorkspaceId);
           if (groupAfterError && groupAfterError.isConnected) {
+            // Treat a thrown addTabGroup call as recoverable if the group was
+            // actually inserted before the API reported the error.
             existingGroupElementsMap.set(topic, groupAfterError);
 
             try {
@@ -461,7 +516,9 @@
       }
 
       try {
-        reorderWorkspaceChildren(window.gZenWorkspaces?.activeWorkspaceElement);
+        // Zen may place loose tabs before groups after a mutation; restore the
+        // intended groups-first order once all assignments are complete.
+        reorderWorkspaceChildren(getActiveWorkspaceElement());
       } catch (error) {
         console.error("Error reordering tabs (groups first):", error);
       }
@@ -469,6 +526,8 @@
       console.error("Error during overall sorting process:", error);
     } finally {
       if (state.isPlayingFailureAnimation) {
+        // Let the failure pulses finish before clearing the sorting state and
+        // removing the temporary UI classes.
         setTimeout(() => {
           state.isSorting = false;
           cleanupAnimation();

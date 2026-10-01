@@ -10,6 +10,7 @@
     ATG_ICON_CATALOG,
   } = ns;
   const {
+    getActiveWorkspaceId,
     getTabNavigationInfo,
     getTabTitle,
     getFilteredTabs,
@@ -306,7 +307,7 @@
     const validTabs = Array.isArray(tabs)
       ? tabs.filter((tab) => tab?.isConnected)
       : [];
-    const workspaceId = window.gZenWorkspaces?.activeWorkspace || "";
+    const workspaceId = getActiveWorkspaceId();
     const existingWorkspaceGroups = getExistingWorkspaceGroups(workspaceId);
     const groupSelector = workspaceId
       ? `tab-group:has(tab[zen-workspace-id="${workspaceId}"])`

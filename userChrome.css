@@ -163,6 +163,13 @@
   }
 }
 
+.better-tidy-tabs-generated-separator {
+  display: flex !important;
+  align-items: center !important;
+  width: 100% !important;
+  min-height: 18px !important;
+}
+
 #vertical-pinned-tabs-container
   .zen-workspace-tabs-section[hide-separator]
   .pinned-tabs-container-separator {
