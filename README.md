@@ -1,110 +1,92 @@
 # Better Tidy Tabs
 
 <p align="center">
-  <img src="./assets/hero-sorting.svg" alt="Better Tidy Tabs hero art showing loose tabs flowing into clean grouped workstreams" width="100%">
+  <img src="./assets/hero-tabs-groups.png" alt="Loose browser tabs being sorted into topic groups" width="100%">
 </p>
 
 <p align="center">
-  <strong>Turn sidebar chaos into clean task groups.</strong><br/>
-  Smarter AI grouping, cloud model choice, faster repeat sorting, and cleaner tab organization for Zen Browser.
+  <strong>Sort Zen's sidebar tabs into groups that match your work.</strong><br/>
+  Choose Firefox Local AI, Google Gemini, or OpenRouter.
 </p>
 
-## Why Better Tidy Tabs
+<p align="center">
+  <a href="https://github.com/Reomar/better-tidy-tabs">Open the GitHub repository</a>
+</p>
 
-`Better Tidy Tabs` is built for people who keep a lot of tabs open and want their Zen sidebar to stay usable.
+## What it does
 
-This fork focuses on one outcome: fewer messy piles of tabs and better task-level grouping with less manual cleanup.
+Better Tidy Tabs adds a brush button to Zen's vertical tabs sidebar. It sorts ungrouped tabs from the active workspace into groups based on their topic and browsing context.
 
-## What This Fork Improves
+- Groups tabs around the task, instead of splitting them by small differences in page titles.
+- Reuses an existing group when the selected AI provider returns its exact name.
+- Avoids singleton groups in cloud sorting and can put ambiguous tabs in `Others`.
+- Leaves unassigned tabs alone unless the provider places them in `Others`.
+- Shows feedback when OpenRouter fails, then tries Firefox Local AI.
+- Caches local embeddings to speed up repeat sorting.
+- Can add icons to groups when Advanced Tab Groups is installed.
 
-- **Cloud model choice**
-  Pick between Firefox Local AI, Google Gemini, or OpenRouter with your own model name.
-- **Task-first grouping**
-  Tabs are grouped by what you are actually doing, not by tiny page-title fragments.
-- **Fewer bad micro-groups**
-  The cloud prompt is tuned to avoid singleton groups and to push leftovers into `Others`.
-- **Better reuse of groups you already opened**
-  If a current group is the right fit, the sorter can place matching tabs into it instead of starting over.
-- **Visible fallback behavior**
-  If OpenRouter fails, the mod shows feedback and falls back to Firefox Local AI instead of leaving you guessing.
-- **Faster repeat local sorting**
-  Cached local embeddings reduce repeated work for Firefox Local AI.
-- **Better cloud reliability**
-  Gemini fallback handling and OpenRouter request tuning reduce brittle one-shot failures.
-- **Advanced Tab Groups icon support**
-  AI-created groups can receive matching icons for cleaner visual scanning.
+Related research, issue pages, documentation, repositories, and searches can end up in the same broader group when they belong to one task. Tabs that do not fit can remain ungrouped or go into `Others`, depending on the provider's response.
 
-## What It Feels Like
+## Install in Zen
 
-Before:
+Add the GitHub repository through Sine Mods:
 
-- mixed research tabs
-- random issue pages
-- docs, repos, and searches all stacked together
+1. Open Zen's Settings and go to **Sine Mods**.
+2. Click **Import**.
+3. Add `Reomar/better-tidy-tabs`. You can also paste the full address:
 
-After:
+   ```text
+   https://github.com/Reomar/better-tidy-tabs
+   ```
 
-- one broader group for the active coding task
-- one group for research or reading
-- leftovers pushed into `Others` instead of spawning junk groups
+4. If Sine flags the repository's JavaScript as unofficial or dangerous, enable **Use JS from unofficial sources**. The mod needs permission to run its browser code.
+5. Confirm the import, enable Better Tidy Tabs, then reload the mod or restart Zen if needed.
 
-## Install In Zen
+Allowing JavaScript from an unofficial source and enabling Firefox's local ML engine are separate settings. Use the steps below if you want to sort with Firefox Local AI.
 
-Import the repo directly with Sine Mods:
+## Enable Firefox ML in Zen
 
-1. Open `Settings` in Zen.
-2. Open `Sine Mods`.
-3. Click `Import`.
-4. Paste:
+Zen turns off Firefox's local ML engine by default. To use Firefox Local AI:
 
-```text
-https://github.com/Reomar/better-tidy-tabs
-```
+1. Enter `about:config` in Zen's address bar and accept the warning.
+2. Search for `browser.ml.enable`.
+3. Set the Boolean preference to `true`.
+4. Open Better Tidy Tabs' Sine settings and set **Sorting Engine** to **Firefox Local AI**.
 
-5. Confirm the install.
-6. Reload mods or restart Zen if needed.
+Zen checks `browser.ml.enable` before creating the ML engine. The separate `browser.ml.enabled` preference does not turn that engine on by itself.
 
 ## Settings
 
-The mod exposes:
+Sine Mods provides these settings for Better Tidy Tabs:
 
-- `Enable AI`
-- `Sorting Engine`
-- `Gemini API Key`
-- `OpenRouter API Key`
-- `OpenRouter Model Name`
+- Enable AI
+- Sorting Engine
+- Gemini API Key
+- OpenRouter API Key
+- OpenRouter Model Name
 
-## Engine Options
+Keep API keys in the mod settings. Do not add them to this repository.
+
+## AI providers
 
 ### Firefox Local AI
 
-- runs on-device
-- best when you want zero API cost
-- good default for privacy-first sorting
+Firefox Local AI groups tabs on your device and does not require a provider API key. Zen's `browser.ml.enable` preference must be true for the engine to run.
 
 ### Google Gemini
 
-- optional cloud provider
-- better when you want broader task grouping than local AI usually gives
-- falls back to Firefox Local AI if unavailable
+Gemini is an optional cloud provider. Add a Gemini API key in the mod settings. If Gemini is unavailable, the sorter falls back to Firefox Local AI. Gemini also has model fallback handling.
 
 ### OpenRouter
 
-- optional cloud provider
-- bring your own model name
-- useful if you want to experiment with different hosted models
-- falls back to Firefox Local AI with visible feedback if the request fails
+OpenRouter lets you choose a hosted model by its model name. Add your API key and model name in the mod settings. If OpenRouter fails, the mod shows feedback and falls back to Firefox Local AI.
 
-## Best Results
+## Grouping tips
 
-You will usually get the strongest results when:
+- Keep each Zen workspace focused on one or two workstreams.
+- Distinct tab titles give the provider more useful context.
+- A cloud model can help when you want broader task grouping.
 
-- the workspace already reflects one or two real workstreams
-- tab titles are not all identical boilerplate
-- you use a capable cloud model for broad task grouping
+## About this fork
 
-## Fork Note
-
-`Better Tidy Tabs` is a fork of [Vertex-Mods/Zen-Tidy-Tabs](https://github.com/Vertex-Mods/Zen-Tidy-Tabs).
-
-Credit goes to the original project and upstream contributors for the Zen sidebar integration, base sorting flow, and the foundation this fork builds on.
+Better Tidy Tabs is a fork of [Vertex-Mods/Zen-Tidy-Tabs](https://github.com/Vertex-Mods/Zen-Tidy-Tabs). Credit goes to the original project and its contributors for the Zen sidebar integration, base sorting flow, and project foundation.
