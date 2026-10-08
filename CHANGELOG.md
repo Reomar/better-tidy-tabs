@@ -4,7 +4,9 @@ This changelog covers changes introduced in this fork after the upstream fork po
 
 ## Unreleased
 
-- Fixed Groq to `openai/gpt-oss-20b`, removed its model-name setting, and enabled strict JSON Schema output with GPT-OSS-specific request parameters.
+## [1.6.1] - 2026-10-08
+
+- Fixed Groq to use `openai/gpt-oss-20b`, removed the Groq model-name setting, and enabled strict JSON Schema output with GPT-OSS-specific request parameters.
 
 ## [1.6.0] - 2026-10-08
 

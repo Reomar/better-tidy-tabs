@@ -1,6 +1,6 @@
 # Better Tidy Tabs
 
-**Version 1.6.0** improves inclusive grouping and naming across all five engines. Version 1.5.0 introduced Groq, Mistral, workspace reorganization, and Undo.
+**Version 1.6.1** fixes Groq by pinning `openai/gpt-oss-20b`, removing its model-name setting, and using strict JSON Schema output. Version 1.6.0 improved inclusive grouping and naming across all five engines. Version 1.5.0 introduced Groq, Mistral, workspace reorganization, and Undo.
 
 <p align="center">
   <img src="./assets/hero-tabs-groups.png" alt="Better Tidy Tabs sorting loose browser tabs into topic groups" width="100%">
