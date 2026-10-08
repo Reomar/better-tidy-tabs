@@ -3,7 +3,7 @@
 **Version 1.5.0** adds Groq and Mistral cloud sorting, workspace reorganization, and Undo.
 
 <p align="center">
-  <img src="./assets/hero-tabs-groups.png" alt="Loose browser tabs being sorted into topic groups" width="100%">
+  <img src="./assets/hero-tabs-groups.png" alt="Better Tidy Tabs sorting loose browser tabs into topic groups" width="100%">
 </p>
 
 <p align="center">
