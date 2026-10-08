@@ -9,7 +9,6 @@
     state,
     CLOUD_PROMPT_CONFIG,
     ATG_ICON_CATALOG,
-    GROQ_CONFIG,
     MISTRAL_CONFIG,
   } = ns;
   const {
@@ -335,17 +334,6 @@
     }
   };
 
-  // Read the Groq model preference, using a supported default when it is blank.
-  const getGroqModel = () => {
-    try {
-      return Services.prefs
-        .getStringPref(PREFS.GROQ_MODEL, GROQ_CONFIG.DEFAULT_MODEL)
-        .trim() || GROQ_CONFIG.DEFAULT_MODEL;
-    } catch {
-      return GROQ_CONFIG.DEFAULT_MODEL;
-    }
-  };
-
   // Read and trim the Groq API key from Firefox prefs.
   const getGroqApiKey = () => {
     try {
@@ -626,6 +614,12 @@
     maxOutputTokens,
     timeoutMs,
     tokenLimitField,
+    systemPrompt = "You are a tab-grouping assistant. Return only valid JSON.",
+    temperature = 0.2,
+    topP,
+    reasoningEffort,
+    reasoningFormat,
+    responseFormat,
   }) => {
     const showFailure = (message) => {
       setProviderFeedback({
@@ -641,15 +635,16 @@
       const requestBody = {
         model: modelName,
         messages: [
-          {
-            role: "system",
-            content: "You are a tab-grouping assistant. Return only valid JSON.",
-          },
+          ...(systemPrompt ? [{ role: "system", content: systemPrompt }] : []),
           { role: "user", content: prompt },
         ],
-        temperature: 0.2,
+        temperature,
       };
       requestBody[tokenLimitField] = maxOutputTokens;
+      if (typeof topP === "number") requestBody.top_p = topP;
+      if (reasoningEffort) requestBody.reasoning_effort = reasoningEffort;
+      if (reasoningFormat) requestBody.reasoning_format = reasoningFormat;
+      if (responseFormat) requestBody.response_format = responseFormat;
 
       const response = await fetch(apiUrl, {
         method: "POST",
@@ -769,7 +764,6 @@
     getOpenRouterApiKey,
     getOpenRouterModel,
     getGroqApiKey,
-    getGroqModel,
     getMistralApiKey,
     getMistralModel,
     getExistingWorkspaceGroups,

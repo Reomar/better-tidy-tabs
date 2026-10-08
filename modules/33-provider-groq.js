@@ -2,6 +2,36 @@
   // Implement the Groq cloud provider using the shared chat-completion flow.
   const ns = window.BetterTidyTabs;
   const { PROVIDERS, GROQ_CONFIG } = ns;
+  const RESPONSE_FORMAT = {
+    type: "json_schema",
+    json_schema: {
+      name: "tab_grouping_plan",
+      strict: true,
+      schema: {
+        type: "object",
+        properties: {
+          groups: {
+            type: "array",
+            items: {
+              type: "object",
+              properties: {
+                id: { type: "string" },
+                topic: { type: "string" },
+                iconId: { type: "string" },
+                existingGroupId: { type: ["string", "null"] },
+                tabIds: { type: "array", items: { type: "string" } },
+              },
+              required: ["id", "topic", "iconId", "existingGroupId", "tabIds"],
+              additionalProperties: false,
+            },
+          },
+          unassignedTabIds: { type: "array", items: { type: "string" } },
+        },
+        required: ["groups", "unassignedTabIds"],
+        additionalProperties: false,
+      },
+    },
+  };
   const {
     buildCloudAssignmentsPrompt,
     buildCloudTabRecords,
@@ -10,7 +40,6 @@
     getCloudMaxOutputTokens,
     getExistingWorkspaceGroups,
     getGroqApiKey,
-    getGroqModel,
     mapProviderAssignments,
     requestOpenAICompatibleAssignments,
     setProviderFeedback,
@@ -30,7 +59,6 @@
       return null;
     }
 
-    const modelName = getGroqModel();
     const existingWorkspaceGroups =
       context.existingWorkspaceGroups ||
       getExistingWorkspaceGroups(context.workspaceId);
@@ -45,7 +73,7 @@
       providerLabel,
       apiUrl: GROQ_CONFIG.API_URL,
       apiKey,
-      modelName,
+      modelName: GROQ_CONFIG.MODEL_ID,
       prompt,
       maxOutputTokens: Math.min(
         GROQ_CONFIG.MAX_OUTPUT_TOKENS,
@@ -53,6 +81,12 @@
       ),
       timeoutMs: GROQ_CONFIG.REQUEST_TIMEOUT_MS,
       tokenLimitField: GROQ_CONFIG.TOKEN_LIMIT_FIELD,
+      systemPrompt: null,
+      temperature: GROQ_CONFIG.TEMPERATURE,
+      topP: GROQ_CONFIG.TOP_P,
+      reasoningEffort: GROQ_CONFIG.REASONING_EFFORT,
+      reasoningFormat: GROQ_CONFIG.REASONING_FORMAT,
+      responseFormat: RESPONSE_FORMAT,
     });
 
     if (!responseData) return null;

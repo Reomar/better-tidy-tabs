@@ -2,6 +2,10 @@
 
 This changelog covers changes introduced in this fork after the upstream fork point at `1780bc1` from `Vertex-Mods/Zen-Tidy-Tabs`.
 
+## Unreleased
+
+- Fixed Groq to `openai/gpt-oss-20b`, removed its model-name setting, and enabled strict JSON Schema output with GPT-OSS-specific request parameters.
+
 ## [1.6.0] - 2026-10-08
 
 - Improved all five engines to prefer inclusive activities spanning sites, repositories, and phases of work; uncertain tabs retain their existing membership.

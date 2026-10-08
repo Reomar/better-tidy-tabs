@@ -102,7 +102,7 @@ The mod supports five providers:
 - `openrouter`
   Optional cloud mode. Requires `extension.zen-tidy-tabs.openrouter-api-key` and `extension.zen-tidy-tabs.openrouter-model`.
 - `groq`
-  Optional cloud mode. Requires `extension.zen-tidy-tabs.groq-api-key`; the model defaults to `openai/gpt-oss-20b` and can be changed with `extension.zen-tidy-tabs.groq-model`.
+  Optional cloud mode. Requires `extension.zen-tidy-tabs.groq-api-key` and always uses `openai/gpt-oss-20b` with strict JSON Schema output.
 - `mistral`
   Optional cloud mode. Requires `extension.zen-tidy-tabs.mistral-api-key`; the model defaults to `mistral-small-latest` and can be changed with `extension.zen-tidy-tabs.mistral-model`.
 
@@ -150,7 +150,7 @@ Bad outcomes:
 - `modules/32-provider-openrouter.js`
   OpenRouter request handling, request-size tuning, response parsing, and user-facing failure mapping.
 - `modules/33-provider-groq.js` and `modules/34-provider-mistral.js`
-  OpenAI-compatible chat requests, configurable models, JSON parsing, and local fallback feedback.
+  OpenAI-compatible chat requests, GPT-OSS structured output for Groq, Mistral's configurable model, JSON parsing, and local fallback feedback.
 - `modules/20-ai-common.js`
   Embedding cache behavior, shared provider context, provider preferences, and OpenAI-compatible chat requests.
 - `modules/35-workspace-state.js`

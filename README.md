@@ -86,7 +86,6 @@ Sine Mods provides these settings for Better Tidy Tabs:
 - OpenRouter API Key
 - OpenRouter Model Name
 - Groq API Key
-- Groq Model Name (defaults to `openai/gpt-oss-20b`)
 - Mistral API Key
 - Mistral Model Name (defaults to `mistral-small-latest`)
 
@@ -110,7 +109,7 @@ OpenRouter lets you choose a hosted model by its model name. Add your API key an
 
 ### Groq
 
-Groq is an optional cloud provider with a rate-limited free tier. Add a Groq API key in the mod settings. The default model is `openai/gpt-oss-20b`; you can change it with **Groq Model Name**. If Groq fails or reaches its rate limit, the mod shows feedback and falls back to Firefox Local AI.
+Groq is an optional cloud provider with a rate-limited free tier. Add a Groq API key in the mod settings. It uses the fixed `openai/gpt-oss-20b` model with strict JSON Schema output and model-tuned reasoning settings. If Groq fails or reaches its rate limit, the mod shows feedback and falls back to Firefox Local AI.
 
 ### Mistral
 

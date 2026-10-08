@@ -51,7 +51,6 @@
     OPENROUTER_API_KEY: "extension.zen-tidy-tabs.openrouter-api-key",
     OPENROUTER_MODEL: "extension.zen-tidy-tabs.openrouter-model",
     GROQ_API_KEY: "extension.zen-tidy-tabs.groq-api-key",
-    GROQ_MODEL: "extension.zen-tidy-tabs.groq-model",
     MISTRAL_API_KEY: "extension.zen-tidy-tabs.mistral-api-key",
     MISTRAL_MODEL: "extension.zen-tidy-tabs.mistral-model",
     GROUP_OWNERSHIP: "extension.zen-tidy-tabs.group-ownership",
@@ -87,10 +86,14 @@
 
   ns.GROQ_CONFIG = {
     API_URL: "https://api.groq.com/openai/v1/chat/completions",
-    DEFAULT_MODEL: "openai/gpt-oss-20b",
+    MODEL_ID: "openai/gpt-oss-20b",
     REQUEST_TIMEOUT_MS: 60000,
     TOKEN_LIMIT_FIELD: "max_completion_tokens",
-    MAX_OUTPUT_TOKENS: 1024,
+    MAX_OUTPUT_TOKENS: 2048,
+    TEMPERATURE: 0.6,
+    TOP_P: 0.95,
+    REASONING_EFFORT: "medium",
+    REASONING_FORMAT: "hidden",
   };
 
   ns.MISTRAL_CONFIG = {

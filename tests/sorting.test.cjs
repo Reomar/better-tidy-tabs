@@ -80,6 +80,9 @@ for (const fixture of fixtures) {
       const payload = referencePayload(fixture, context.tabRecords);
       h.world.prefs.set(h.ns.PREFS[`${provider.toUpperCase()}_API_KEY`], 'synthetic-test-key');
       h.world.prefs.set(h.ns.PREFS.OPENROUTER_MODEL, 'synthetic-test-model');
+      if (provider === 'groq') {
+        h.world.prefs.set('extension.zen-tidy-tabs.groq-model', 'user-selected-model-must-be-ignored');
+      }
       h.world.response = jsonResponse(payload, { gemini: provider === 'gemini' });
       const result = await h.ns.getProvider(provider).assignTopics(context);
       const clusters = Object.values(h.ns.buildFinalGroupsFromAssignments(result)).map((g) => g.tabs.map((t) => t.id));
@@ -87,10 +90,23 @@ for (const fixture of fixtures) {
       for (const [a,b] of fixture.separate) assert.ok(!sameCluster(clusters, a, b));
       assert.equal(h.world.requests.length, 1);
       const request = h.world.requests[0].body;
-      const prompt = provider === 'gemini' ? request.contents[0].parts[0].text : request.messages[1].content;
+      const prompt = provider === 'gemini' ? request.contents[0].parts[0].text : request.messages.find((message) => message.role === 'user').content;
       assert.match(prompt, /broadest coherent/);
       assert.match(prompt, /unassignedTabIds/);
       assert.ok(!prompt.includes('linkedBrowser'));
+      if (provider === 'groq') {
+        assert.equal(h.ns.PREFS.GROQ_MODEL, undefined);
+        assert.equal(request.model, 'openai/gpt-oss-20b');
+        assert.equal(request.temperature, 0.6);
+        assert.equal(request.top_p, 0.95);
+        assert.equal(request.reasoning_effort, 'medium');
+        assert.equal(request.reasoning_format, 'hidden');
+        assert.ok(request.max_completion_tokens <= 2048);
+        assert.deepEqual(plain(request.messages.map((message) => message.role)), ['user']);
+        assert.equal(request.response_format.type, 'json_schema');
+        assert.equal(request.response_format.json_schema.strict, true);
+        assert.deepEqual(plain(request.response_format.json_schema.schema.required), ['groups', 'unassignedTabIds']);
+      }
     });
   }
 }
