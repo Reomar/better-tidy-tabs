@@ -2,6 +2,16 @@
 
 This changelog covers changes introduced in this fork after the upstream fork point at `1780bc1` from `Vertex-Mods/Zen-Tidy-Tabs`.
 
+## [1.6.0] - 2026-10-08
+
+- Improved all five engines to prefer inclusive activities spanning sites, repositories, and phases of work; uncertain tabs retain their existing membership.
+- Added independent path/search context, representative existing-group samples, explicit destination identities, and complete grouped cloud-response validation.
+- Separated provider bucket identity from display labels so duplicate and shortened names cannot combine unrelated assignments.
+- Replaced local first-tab clustering with deterministic average-link clustering, bounded hostname/repository boosts, semantic guards, and clear existing-group matching.
+- Improved local naming with Unicode keywords, workspace-relative ranking, at most three representative titles, preserved brands/acronyms, deterministic generation, and grounded fallbacks.
+- Made valid empty results successful no-ops and protected manual tab reorders, stale destinations, and exchanges involving groups emptied by sorting.
+- Added 108 dependency-free mocked chrome regression tests, 12 synthetic workspace fixtures, and a real-engine validation runner. Manual Zen and real-provider validation remains pending.
+
 ## [1.5.0] - 2026-10-08
 
 - Added Groq and Mistral as optional cloud providers with editable model settings.

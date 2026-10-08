@@ -146,45 +146,50 @@
     }
   };
 
-  // Extract compact URL context that helps cloud models infer tab intent.
+  // Keep path and search evidence separate, including on /search pages.
   const getTabNavigationInfo = (tab) => {
-    if (!tab?.isConnected) {
-      return { host: "", pathHint: "" };
-    }
-
+    const empty = { host: "", pathHint: "", searchHint: "", repositoryKey: "" };
+    if (!tab?.isConnected) return empty;
     try {
-      const browser =
-        tab.linkedBrowser ||
-        tab._linkedBrowser ||
+      const browser = tab.linkedBrowser || tab._linkedBrowser ||
         window.gBrowser?.getBrowserForTab?.(tab);
-      const spec = browser?.currentURI?.spec;
-      if (!spec || spec.startsWith("about:")) {
-        return { host: "", pathHint: "" };
-      }
-
-      const url = new URL(spec);
-      const host = url.hostname.replace(/^www\./, "");
-      const pathSegments = url.pathname.split("/").filter(Boolean).slice(0, 3);
-      const searchHint =
-        url.searchParams.get("q") ||
-        url.searchParams.get("query") ||
-        url.searchParams.get("search") ||
-        "";
-
+      const url = new URL(browser?.currentURI?.spec || "");
+      if (!["http:", "https:"].includes(url.protocol)) return empty;
+      const host = url.hostname.toLowerCase().replace(/^www\./, "");
+      const segments = url.pathname.split("/").filter(Boolean).slice(0, 3)
+        .map((segment) => {
+          try { return decodeURIComponent(segment); } catch { return segment; }
+        });
+      const reserved = new Set(["search", "settings", "topics", "collections",
+        "orgs", "users", "login", "signup", "marketplace", "features", "sponsors"]);
+      const repositoryKey = host === "github.com" && segments.length >= 2 &&
+        !reserved.has(segments[0].toLowerCase())
+        ? `${segments[0]}/${segments[1].replace(/\.git$/i, "")}`.toLowerCase() : "";
       return {
         host,
-        pathHint: pathSegments.join("/") || searchHint,
+        pathHint: segments.join("/"),
+        searchHint: url.searchParams.get("q") || url.searchParams.get("query") ||
+          url.searchParams.get("search") || "",
+        repositoryKey,
       };
-    } catch {
-      return { host: "", pathHint: "" };
-    }
+    } catch { return empty; }
+  };
+
+  const tokenizeText = (text) =>
+    (String(text || "").toLowerCase().match(/[\p{L}\p{N}]+/gu) || [])
+      .filter((word) => Array.from(word).length > 2);
+
+  const getStableTabKey = (tab) => {
+    const info = getTabNavigationInfo(tab);
+    return tab.id || [getTabTitle(tab).toLowerCase(), info.host, info.pathHint,
+      info.searchHint].join("\u0000");
   };
 
   // Limit long strings before sending them to models or using them in labels.
   const truncateText = (text, maxLength) => {
     if (!text || typeof text !== "string") return "";
     if (text.length <= maxLength) return text;
-    return `${text.slice(0, maxLength - 1)}...`;
+    return `${text.slice(0, Math.max(0, maxLength - 3))}...`;
   };
 
   // Normalize topic names for case-insensitive matching and map lookups.
@@ -207,14 +212,15 @@
       return safeFallback;
     }
 
-    const cleaned = topic
-      .trim()
-      .replace(/^['"`]+|['"`]+$/g, "")
-      .replace(/[.?!,:;]+$/g, "")
-      .trim()
-      .slice(0, CLOUD_PROMPT_CONFIG.MAX_GROUP_NAME_LENGTH);
-
-    return cleaned || safeFallback;
+    const cleaned = topic.trim().replace(/^['"`]+|['"`]+$/g, "")
+      .replace(/[.?!,:;]+$/g, "").replace(/\s+/g, " ").trim();
+    const chars = Array.from(cleaned);
+    const limit = CLOUD_PROMPT_CONFIG.MAX_GROUP_NAME_LENGTH;
+    if (chars.length <= limit) return cleaned || safeFallback;
+    const prefix = chars.slice(0, limit).join("");
+    const boundary = prefix.lastIndexOf(" ");
+    return (boundary > 0 && chars[limit] !== " " ? prefix.slice(0, boundary) : prefix)
+      .trim() || safeFallback;
   };
 
   // Remove duplicate or falsy values while preserving insertion order.
@@ -293,56 +299,34 @@
     }
   };
 
-  // Convert provider assignments into the final group structure used by sorting.
-  const buildFinalGroupsFromAssignments = (
-    assignments,
-    existingGroupNameMap = new Map()
-  ) => {
+  // Bucket by provider identity; display-label collisions never change membership.
+  const buildFinalGroupsFromAssignments = (assignments, existingGroups = new Map()) => {
     const finalGroups = Object.create(null);
     const seenTabs = new Set();
-
-    assignments.forEach(({ tab, topic, iconId }) => {
-      // Providers decide grouping. The UI layer only validates assignments and
-      // reuses canonical existing group names so later DOM moves stay predictable.
-      if (
-        !tab?.isConnected ||
-        seenTabs.has(tab) ||
-        typeof topic !== "string" ||
-        !topic.trim()
-      ) {
-        return;
+    for (const assignment of assignments) {
+      const { tab, topic, iconId, existingGroupId = null } = assignment || {};
+      if (!tab?.isConnected || seenTabs.has(tab) || typeof topic !== "string" || !topic.trim()) continue;
+      const legacy = !assignment.groupId;
+      let destinationId = existingGroupId;
+      if (legacy) {
+        const matches = [...existingGroups.entries()].filter(([, info]) =>
+          normalizeTopicKey(info.name) === normalizeTopicKey(topic));
+        if (matches.length === 1) destinationId = matches[0][0];
       }
-
-      const normalizedTopic = normalizeTopicKey(topic);
-      const canonicalExistingGroup =
-        existingGroupNameMap.get(normalizedTopic) || null;
-      const finalTopic = canonicalExistingGroup
-        ? canonicalExistingGroup
-        : sanitizeTopicName(topic, "Group");
-
-      if (!finalTopic) {
-        return;
-      }
-
-      if (!finalGroups[finalTopic]) {
-        finalGroups[finalTopic] = {
-          tabs: [],
-          iconId: getResolvedIconId(iconId, finalTopic),
-        };
-      }
-
-      finalGroups[finalTopic].tabs.push(tab);
-      if (!finalGroups[finalTopic].iconId && iconId) {
-        finalGroups[finalTopic].iconId = getResolvedIconId(iconId, finalTopic);
-      }
+      const destination = destinationId ? existingGroups.get(destinationId) : null;
+      if (destinationId && (!destination ||
+          normalizeTopicKey(destination.name) !== normalizeTopicKey(topic))) continue;
+      const bucketId = legacy ? `legacy:${normalizeTopicKey(topic)}` : `provider:${assignment.groupId}`;
+      const bucket = finalGroups[bucketId];
+      if (bucket && ((legacy ? normalizeTopicKey(bucket.topic) !== normalizeTopicKey(topic) :
+          bucket.topic !== topic) || bucket.existingGroupId !== destinationId)) continue;
+      finalGroups[bucketId] ||= {
+        groupId: bucketId, topic, label: destination ? destination.name : sanitizeTopicName(topic),
+        existingGroupId: destinationId, tabs: [], iconId: getResolvedIconId(iconId, topic),
+      };
+      finalGroups[bucketId].tabs.push(tab);
       seenTabs.add(tab);
-    });
-
-    Object.entries(finalGroups).forEach(([groupName, groupData]) => {
-      groupData.tabs = uniqueArray(groupData.tabs);
-      groupData.iconId = getResolvedIconId(groupData.iconId, groupName);
-    });
-
+    }
     return finalGroups;
   };
 
@@ -388,6 +372,8 @@
     getFilteredTabs,
     getTabTitle,
     getTabNavigationInfo,
+    tokenizeText,
+    getStableTabKey,
     truncateText,
     normalizeTopicKey,
     normalizeIconId,

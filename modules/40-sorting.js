@@ -10,18 +10,16 @@
     getActiveWorkspaceElement,
     getActiveWorkspaceId,
     getPreferredAIProvider,
-    normalizeTopicKey,
     buildFinalGroupsFromAssignments,
     applyATGGroupIconIfNeeded,
-    findGroupElement,
-    getTabTitle,
   } = ns;
 
   // Route tab grouping through the selected provider and fall back to local AI.
   const askAIForMultipleTopics = async (tabs, options = {}) => {
     // Build one provider-neutral snapshot so every provider sees the same tabs
     // and existing-group context.
-    const context = buildProviderContext(tabs, options);
+    const context = options.context || buildProviderContext(tabs, options);
+    state.lastProviderFeedback = null;
     if (context.tabs.length === 0) {
       return [];
     }
@@ -31,7 +29,7 @@
     const localProvider = ns.getProvider(PROVIDERS.FIREFOX_LOCAL);
     if (!localProvider) {
       console.error("[TabSort] Local provider is not registered.");
-      return [];
+      return null;
     }
 
     const preferredProviderId = getPreferredAIProvider();
@@ -51,15 +49,11 @@
           error
         );
 
-        if (preferredProvider.id === PROVIDERS.OPENROUTER) {
-          feedback = {
-            providerId: preferredProvider.id,
-            title: formatProviderLabel(preferredProvider.id),
-            message:
-              error?.userMessage ||
-              "OpenRouter failed. Using Firefox local AI instead.",
-          };
-        }
+        feedback = {
+          providerId: preferredProvider.id,
+          title: formatProviderLabel(preferredProvider.id),
+          message: error?.userMessage || `${formatProviderLabel(preferredProvider.id)} returned an invalid result or failed. Using Firefox local AI instead.`,
+        };
       }
 
       if (Array.isArray(cloudAssignments)) {
@@ -69,6 +63,11 @@
       // Providers can publish a user-facing failure message without throwing.
       // Consume it before falling back so the UI does not fail silently.
       feedback ||= consumeProviderFeedback();
+      feedback ||= {
+        providerId: preferredProvider.id,
+        title: formatProviderLabel(preferredProvider.id),
+        message: `${formatProviderLabel(preferredProvider.id)} is unavailable. Using Firefox local AI instead.`,
+      };
       if (
         feedback?.message &&
         typeof ns.showRuntimeToast === "function"
@@ -85,7 +84,12 @@
       );
     }
 
-    return localProvider.assignTopics(context);
+    try {
+      return await localProvider.assignTopics(context);
+    } catch (error) {
+      console.warn("[TabSort] Firefox local AI failed:", error);
+      return null;
+    }
   };
 
   // Stop any running separator animation and reset the line to a resting state.
@@ -328,31 +332,48 @@
       // preserving the provider's topic decisions.
       const requestLayout = ns.captureWorkspaceLayout(currentWorkspaceId);
       const originalRows = new Map(requestLayout.tabs.map((row) => [row.tab, row]));
-      const aiTabTopics = (await askAIForMultipleTopics(initialTabsToSort, {
-        mode, workspaceId: currentWorkspaceId,
-      })) || [];
+      const context = buildProviderContext(initialTabsToSort, { mode, workspaceId: currentWorkspaceId });
+      const aiTabTopics = await askAIForMultipleTopics(initialTabsToSort, { context });
       if (state.disposed || window.BetterTidyTabs !== ns) return;
       if (getActiveWorkspaceId() !== currentWorkspaceId) {
         ns.showRuntimeToast?.({ message: "Workspace changed while sorting. No tabs were moved." });
         return;
       }
 
-      // Refresh destinations and eligibility after the provider request.
-      const existingGroupNameMap = new Map();
-      const existingGroupElementsMap = new Map();
-      const blockedTopics = new Set();
+      if (!Array.isArray(aiTabTopics)) {
+        ns.showRuntimeToast?.({ message: "Firefox local AI is unavailable. Tabs were left unchanged." });
+        startFailureAnimation();
+        return;
+      }
+      if (!aiTabTopics.length) {
+        ns.showRuntimeToast?.({ message: "No clear groups found; tabs were left unchanged." });
+        return;
+      }
+
+      const recordedTabs = new Set(requestLayout.tabs.map((row) => row.tab));
+      const currentOrder = ns.getFilteredTabs(currentWorkspaceId, { includeGrouped: true })
+        .filter((tab) => recordedTabs.has(tab));
+      const presentTabs = new Set(currentOrder);
+      const previousOrder = requestLayout.tabs.map((row) => row.tab)
+        .filter((tab) => presentTabs.has(tab));
+      if (currentOrder.some((tab, index) => tab !== previousOrder[index])) {
+        ns.showRuntimeToast?.({ message: "Tab order changed while sorting. Tabs were left unchanged." });
+        return;
+      }
+
+      // Resolve only the exact destinations captured in this request.
+      const existingGroups = new Map();
       const managedGroups = new Set();
-      ns.getWorkspaceGroups(currentWorkspaceId).forEach((group) => {
-        const label = group.getAttribute("label");
-        if (!label) return;
-        if (ns.isGroupLocked(group) || !ns.isOrdinaryGroup(group)) {
-          blockedTopics.add(normalizeTopicKey(label));
-          return;
-        }
-        existingGroupNameMap.set(normalizeTopicKey(label), label);
-        existingGroupElementsMap.set(label, group);
-        if (ns.isManagedGroup(group)) managedGroups.add(group);
-      });
+      const liveGroups = new Set(ns.getWorkspaceGroups(currentWorkspaceId));
+      for (const [id, saved] of context.existingWorkspaceGroups) {
+        const group = saved.element;
+        if (liveGroups.has(group) && group.isConnected && group.id === saved.nativeId &&
+            !ns.isGroupLocked(group) && ns.isOrdinaryGroup(group) &&
+            group.getAttribute("label") === saved.name &&
+            [...group.querySelectorAll("tab")].every((tab) =>
+              tab.getAttribute("zen-workspace-id") === currentWorkspaceId)) existingGroups.set(id, saved);
+      }
+      for (const group of liveGroups) if (ns.isManagedGroup(group)) managedGroups.add(group);
       const eligibleTabs = new Set(ns.getSortableTabs(currentWorkspaceId, mode));
       const requestTabs = new Set(initialTabsToSort);
       const isEligible = (tab) => {
@@ -362,161 +383,121 @@
         return !savedGroup || (row.group.getAttribute("label") === savedGroup.label &&
           !ns.isGroupLocked(row.group));
       };
-      const usableAssignments = aiTabTopics.filter(({ tab, topic }) =>
-        isEligible(tab) && typeof topic === "string" &&
-        !blockedTopics.has(normalizeTopicKey(topic)) &&
-        !blockedTopics.has(normalizeTopicKey(ns.sanitizeTopicName(topic))));
-      const finalGroups = buildFinalGroupsFromAssignments(
-        usableAssignments,
-        existingGroupNameMap
-      );
-
-      const assignedTabsCount = aiTabTopics.length;
-      const sortingFailed =
-        assignedTabsCount === 0 && initialTabsToSort.length > 1;
-
-      // A single unassigned tab is not treated as a failure; there is no useful
-      // group to create for it. Multiple unassigned tabs get visible feedback.
-      if (sortingFailed) {
-        startFailureAnimation();
-        return;
-      }
-
-      if (Object.keys(finalGroups).length === 0) {
-        return;
-      }
+      const usableAssignments = aiTabTopics.filter((assignment) => assignment &&
+        isEligible(assignment.tab) && typeof assignment.topic === "string" &&
+        (!assignment.existingGroupId || existingGroups.has(assignment.existingGroupId)));
+      const finalGroups = buildFinalGroupsFromAssignments(usableAssignments, existingGroups);
+      if (!Object.keys(finalGroups).length) return;
 
       undoBefore = ns.captureWorkspaceLayout(currentWorkspaceId);
       const iconsToApply = [];
-
-      for (const topic in finalGroups) {
-        const groupData = finalGroups[topic];
+      const emptiedBySort = new Set();
+      let didMutate = false;
+      const noteEmptySources = (sources) => {
+        for (const source of sources) if (source && !source.querySelector("tab")) emptiedBySort.add(source);
+      };
+      for (const groupData of Object.values(finalGroups)) {
+        const topic = groupData.label;
         const tabsForThisTopic = groupData.tabs.filter(isEligible);
-
-        if (tabsForThisTopic.length === 0) {
-          continue;
-        }
-
-        const existingGroupElement = existingGroupElementsMap.get(topic);
-
-        if (existingGroupElement && existingGroupElement.isConnected && !ns.isGroupLocked(existingGroupElement)) {
+        const destination = groupData.existingGroupId ? existingGroups.get(groupData.existingGroupId) : null;
+        let existingGroupElement = destination?.element;
+        if (existingGroupElement) {
+          // Recreate only a destination drained by our own synchronous moves.
+          // A destination removed while the provider was responding was already rejected.
+          if (emptiedBySort.has(existingGroupElement)) {
+            const saved = requestLayout.groups.find((group) => group.element === existingGroupElement);
+            if (!saved || !tabsForThisTopic.length) continue;
+            const sources = tabsForThisTopic.map(ns.getTabGroup);
+            let recreated = null;
+            try {
+              if (existingGroupElement.isConnected) existingGroupElement.remove();
+              recreated = gBrowser.addTabGroup(tabsForThisTopic, {
+                id: saved.id, label: saved.label, color: saved.color,
+                insertBefore: ns.getTabGroup(tabsForThisTopic[0]) || tabsForThisTopic[0],
+              });
+            } catch (error) {
+              console.error("[TabSort] Could not restore a destination drained by sorting:", error);
+            }
+            noteEmptySources(sources);
+            didMutate ||= tabsForThisTopic.some((tab, index) => ns.getTabGroup(tab) !== sources[index]);
+            existingGroupElement = recreated || ns.getTabGroup(tabsForThisTopic[0]);
+            if (!existingGroupElement?.isConnected || existingGroupElement.id !== saved.id) continue;
+            destination.element = existingGroupElement;
+            existingGroupElement.collapsed = false;
+            managedGroups.add(existingGroupElement);
+            iconsToApply.push([existingGroupElement, groupData.iconId]);
+            continue;
+          }
+          // Never retarget a disappeared destination by label, even when labels repeat.
+          if (!existingGroupElement.isConnected || ns.isGroupLocked(existingGroupElement) ||
+              !ns.isOrdinaryGroup(existingGroupElement) ||
+              existingGroupElement.getAttribute("label") !== destination.name) continue;
+          const movingTabs = tabsForThisTopic.filter((tab) => ns.getTabGroup(tab) !== existingGroupElement);
+          if (!movingTabs.length) continue;
+          const sources = movingTabs.map(ns.getTabGroup);
           try {
-            // Reusing a collapsed group should reveal it so the newly assigned
-            // tabs are immediately visible to the user.
             if (existingGroupElement.getAttribute("collapsed") === "true") {
               existingGroupElement.setAttribute("collapsed", "false");
-              const groupLabelElement =
-                existingGroupElement.querySelector(".tab-group-label");
-              if (groupLabelElement) {
-                groupLabelElement.setAttribute("aria-expanded", "true");
-              }
+              existingGroupElement.querySelector(".tab-group-label")?.setAttribute("aria-expanded", "true");
+              didMutate = true;
             }
-
-            for (const tab of tabsForThisTopic) {
-              if (isEligible(tab)) {
-                gBrowser.moveTabToExistingGroup(tab, existingGroupElement);
-              } else {
-                console.warn(
-                  ` -> Tab "${getTabTitle(tab) || "Unknown"}" skipped moving to "${topic}" (changed while sorting).`
-                );
-              }
+            for (const tab of movingTabs) if (isEligible(tab)) {
+              const source = ns.getTabGroup(tab);
+              gBrowser.moveTabToExistingGroup(tab, existingGroupElement);
+              didMutate = true;
+              noteEmptySources([source]);
             }
-
             iconsToApply.push([existingGroupElement, groupData.iconId]);
           } catch (error) {
-            console.error(
-              `Error moving tabs to existing group "${topic}":`,
-              error,
-              existingGroupElement
-            );
+            console.error("[TabSort] Could not move tabs to existing group:", error);
+            noteEmptySources(sources);
+            didMutate ||= movingTabs.some((tab, index) => ns.getTabGroup(tab) !== sources[index]);
           }
           continue;
         }
-
-        if (tabsForThisTopic.length === 0) {
-          continue;
-        }
-
-        const firstValidTabForGroup = tabsForThisTopic[0];
-        const groupOptions = {
-          label: topic,
-          insertBefore: ns.getTabGroup(firstValidTabForGroup) || firstValidTabForGroup,
-        };
-
+        if (groupData.existingGroupId || tabsForThisTopic.length < 2) continue;
+        const previousGroups = new Set(ns.getWorkspaceGroups(currentWorkspaceId));
+        const sources = tabsForThisTopic.map(ns.getTabGroup);
+        let newGroup = null;
         try {
-          // Insert the new group at the first assigned tab so the workspace
-          // keeps a stable, predictable position after grouping.
-          const newGroup = gBrowser.addTabGroup(tabsForThisTopic, groupOptions);
-          if (newGroup && newGroup.isConnected) {
-            existingGroupElementsMap.set(topic, newGroup);
-            managedGroups.add(newGroup);
-
-            try {
-              if (typeof newGroup._useFaviconColor === "function") {
-                setTimeout(() => {
-                  if (!state.disposed && newGroup.isConnected) newGroup._useFaviconColor();
-                }, 500);
-              }
-            } catch {
-              // Ignore ATG-specific coloring failures.
-            }
-
-            iconsToApply.push([newGroup, groupData.iconId]);
-          } else {
-            // Some Zen/ATG versions do not return the created element even when
-            // creation succeeds, so recover it from the workspace DOM.
-            const newGroupElFallback = findGroupElement(topic, currentWorkspaceId);
-            if (newGroupElFallback && newGroupElFallback.isConnected) {
-              existingGroupElementsMap.set(topic, newGroupElFallback);
-              managedGroups.add(newGroupElFallback);
-
-              try {
-                if (typeof newGroupElFallback._useFaviconColor === "function") {
-                  setTimeout(() => {
-                    if (!state.disposed && newGroupElFallback.isConnected) newGroupElFallback._useFaviconColor();
-                  }, 500);
-                }
-              } catch {
-                // Ignore ATG-specific coloring failures.
-              }
-
-              iconsToApply.push([newGroupElFallback, groupData.iconId]);
-            } else {
-              console.error(
-                ` -> Failed to find the newly created group element for "${topic}" even with fallback.`
-              );
-            }
-          }
+          newGroup = gBrowser.addTabGroup(tabsForThisTopic, {
+            label: topic,
+            insertBefore: ns.getTabGroup(tabsForThisTopic[0]) || tabsForThisTopic[0],
+          });
         } catch (error) {
-          console.error(
-            `Error calling gBrowser.addTabGroup for topic "${topic}":`,
-            error
-          );
-
-          const groupAfterError = findGroupElement(topic, currentWorkspaceId);
-          if (groupAfterError && groupAfterError.isConnected) {
-            // Treat a thrown addTabGroup call as recoverable if the group was
-            // actually inserted before the API reported the error.
-            existingGroupElementsMap.set(topic, groupAfterError);
-            managedGroups.add(groupAfterError);
-
-            try {
-              if (typeof groupAfterError._useFaviconColor === "function") {
-                setTimeout(() => {
-                  if (!state.disposed && groupAfterError.isConnected) groupAfterError._useFaviconColor();
-                }, 500);
-              }
-            } catch {
-              // Ignore ATG-specific coloring failures.
-            }
-
-            iconsToApply.push([groupAfterError, groupData.iconId]);
-          } else {
-            console.error(` -> Failed to find group "${topic}" after creation error.`);
-          }
+          console.error("[TabSort] Could not create group:", error);
         }
+        // Preserve Undo even when a native mutation throws after moving only some tabs.
+        didMutate ||= tabsForThisTopic.some((tab, index) => ns.getTabGroup(tab) !== sources[index]);
+        noteEmptySources(sources);
+        for (const tab of tabsForThisTopic) {
+          const candidate = ns.getTabGroup(tab);
+          if (candidate?.isConnected && !previousGroups.has(candidate) &&
+              candidate.getAttribute("label") === topic) managedGroups.add(candidate);
+        }
+        // Some Zen versions insert a group without returning it. Recover by membership.
+        if (!newGroup?.isConnected || previousGroups.has(newGroup)) {
+          const candidate = ns.getTabGroup(tabsForThisTopic[0]);
+          newGroup = candidate?.isConnected && !previousGroups.has(candidate) &&
+            candidate.getAttribute("label") === topic &&
+            tabsForThisTopic.every((tab) => ns.getTabGroup(tab) === candidate) ? candidate : null;
+        }
+        if (!newGroup) continue;
+        didMutate = true;
+        noteEmptySources(sources);
+        managedGroups.add(newGroup);
+        iconsToApply.push([newGroup, groupData.iconId]);
+        if (typeof newGroup._useFaviconColor === "function") setTimeout(() => {
+          if (!state.disposed && newGroup.isConnected) {
+            try { newGroup._useFaviconColor(); } catch { /* Optional ATG coloring. */ }
+          }
+        }, 500);
       }
 
+      if (!didMutate) {
+        undoBefore = null;
+        return;
+      }
       for (const group of managedGroups) {
         if (!group.querySelector("tab")) {
           if (group.isConnected) group.remove();

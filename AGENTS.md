@@ -51,7 +51,7 @@ The runtime is now modular. `tidy-tabs.uc.js` is only a bootstrap loader that cr
 - It depends on Zen globals and browser internals such as `gBrowser`, `gZenWorkspaces`, `gZenUIManager`, and `MozXULElement`.
 - Module loading depends on script order. There is no module system or bundler here.
 - DOM timing is fragile. Zen may re-render the sidebar separators and workspace containers at any time.
-- There is no build step or automated test suite.
+- There is no build step. Run `node --test tests/sorting.test.cjs` for dependency-free mocked chrome regressions; see `tests/README.md` for real-engine and manual browser validation.
 
 ## Current Product Behavior
 
@@ -62,13 +62,15 @@ The runtime is now modular. `tidy-tabs.uc.js` is only a bootstrap loader that cr
 - Group ownership and locks persist in a browser preference. Renames and manually added members protect a tracked group until the user allows reorganization again.
 - Keeps one Undo snapshot per workspace for the current runtime and refuses restoration over subsequent manual layout changes.
 - Passes current tabs and existing group context to the selected provider.
-- Reuses an existing group only by exact normalized name when the provider chooses it.
-- Creates new groups directly from provider-returned topic names.
-- Leaves unassigned tabs untouched unless the provider explicitly places them in `Others`.
+- Reuses an existing group only by its explicit request-scoped ID and exact normalized provider-chosen name. Duplicate labels remain distinct destinations.
+- Buckets assignments by provider group ID, preserves full topics internally, and shortens only display labels. Identical labels never merge groups.
+- Leaves uncertain loose tabs loose and uncertain grouped tabs in their source groups. Bundled providers do not create Others or add residual tabs to it.
 - Preserves grouped tabs during Zen's clear-tabs flow.
 - Falls back to Firefox local AI when a cloud provider fails.
 - Shows a runtime toast when OpenRouter, Groq, or Mistral fails and the mod falls back locally.
-- Uses a stricter cloud prompt that forbids singleton groups and pushes ambiguous leftovers into `Others`.
+- Uses inclusive cloud prompts: related work stays together across sites, repositories, and phases. New groups need two tabs; uncertain tabs are explicitly unassigned.
+- Local grouping uses deterministic average-link clustering, bounded URL boosts, semantic guards, and clear existing-group matching.
+- Valid empty results are successful no-ops; real provider/ML failures retain feedback and fallback.
 
 ## Module Naming
 
@@ -109,8 +111,12 @@ All providers should implement the same contract:
 - register through `window.BetterTidyTabs.registerProvider(...)`
 - expose a stable `id`
 - expose `assignTopics(context)`
-- return an array of `{ tab, topic, iconId }` assignments on success
+- return an array of `{ tab, groupId, topic, iconId, existingGroupId }` assignments on success
+- use request-scoped bucket IDs and existing destination IDs, with `existingGroupId: null` for new groups
+- return `[]` for a valid no-op; missing assignments leave tabs unchanged
 - return `null` when the provider is unavailable so the orchestration layer can fall back cleanly
+
+Cloud payloads use `{ groups: [{ id, topic, iconId, existingGroupId, tabIds }], unassignedTabIds }`. Validate the whole plan before mapping: IDs and membership must be unique, each incoming tab must be covered exactly once, reused destination names must match, and new groups cannot be singletons. Each existing destination may be referenced only once. Legacy runtime assignments without groupId bucket by the full normalized untruncated topic; exact unique-name reuse remains supported for legacy providers.
 
 Cloud providers should not own fallback to local AI themselves. Fallback belongs in `modules/40-sorting.js`.
 
@@ -118,18 +124,21 @@ The settings UI intentionally keeps all cloud-provider API key fields always vis
 
 ## Grouping Intent
 
-The provider prompt should group by task and browsing context, not by narrow page-title fragments.
+Providers should prefer the broadest coherent activity or subject, using hostname and repository evidence without forcing site-only groups or project-by-project fragmentation. Decide membership before naming the shared purpose.
 
 Good outcomes:
 
 - several GitHub, docs, and search tabs for the same task collapse into one broader task group
-- existing groups are reused only when the provider intentionally names them
-- isolated tabs land in `Others` instead of becoming singleton groups
+- existing groups are reused only when the provider intentionally selects their identity and exact normalized name
+- uncertain tabs keep their current position or group instead of being forced into residual or singleton groups
+- short English names describe the whole group and preserve brands and acronyms
 
 Bad outcomes:
 
 - many single-tab groups
-- local code silently renaming or merging provider output
+- display-label truncation merging provider buckets or retargeting destinations by label
+- hostname-only grouping of unrelated platform content
+- local code silently renaming or semantically merging cloud provider output
 - local heuristics overriding what the provider already decided
 
 ## Important Areas
@@ -172,12 +181,14 @@ Manual validation in Zen is required:
 1. Import or reload the mod through Sine Mods.
 2. Confirm the separator line and brush button appear when sortable tabs exist.
 3. Test Firefox Local AI, Gemini, OpenRouter, Groq, and Mistral.
-4. Test existing-group reuse by exact provider-chosen name plus new-group creation.
-5. Confirm `Others` only appears when the provider explicitly returns it.
+4. Test explicit existing-group ID plus exact provider-chosen name, duplicate existing labels, new-group creation, and collisions between shortened labels.
+5. Confirm no new Others group or residual additions, uncertain loose/grouped tabs retain membership, and valid no-ops show feedback without failure pulses.
 6. Confirm clear-tabs still preserves grouped tabs.
 7. Reload the mod more than once and confirm duplicate listeners or broken hooks do not appear.
 8. Test each cloud provider with an invalid key, an unavailable model, and a rate limit; confirm fallback to local AI shows a useful toast.
 9. Reorganize a tracked group together with related loose tabs; confirm tabs can leave Others and move into new or existing topics.
 10. Confirm unknown groups keep their members, explicit Allow reorganization includes old groups, and locked groups receive no additions or removals.
 11. Undo a sort and a reorganization, including a source group emptied by reassignment. Confirm membership, group labels, colors, collapsed state, and order are restored.
-12. Switch workspaces or move/pin/navigate a tab while a provider is responding; confirm stale results do not move those tabs.
+12. Switch workspaces or reorder/move/pin/navigate a tab, rename/remove/move a destination, or lock it while a provider is responding; confirm stale results do not overwrite changes.
+13. Exchange members between existing editable destinations, including one emptied by an earlier move in the same sort. Verify grouping and Undo.
+14. Run all 12 fixtures against the real local model and each configured cloud provider using `tests/live-validation.js`; review pair constraints and names. Mocked responses and synthetic vectors are not release acceptance.

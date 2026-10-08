@@ -36,20 +36,21 @@
   const GEMINI_ASSIGNMENTS_SCHEMA = {
     type: "OBJECT",
     properties: {
-      assignments: {
-        type: "ARRAY",
-        items: {
-          type: "OBJECT",
-          properties: {
-            tabId: { type: "STRING" },
+      groups: {
+        type: "ARRAY", items: {
+          type: "OBJECT", properties: {
+            id: { type: "STRING" },
             topic: { type: "STRING" },
             iconId: { type: "STRING" },
+            existingGroupId: { type: "STRING", nullable: true },
+            tabIds: { type: "ARRAY", items: { type: "STRING" } },
           },
-          required: ["tabId", "topic"],
+          required: ["id", "topic", "iconId", "existingGroupId", "tabIds"],
         },
       },
+      unassignedTabIds: { type: "ARRAY", items: { type: "STRING" } },
     },
-    required: ["assignments"],
+    required: ["groups", "unassignedTabIds"],
   };
 
   // Build Gemini generation config, optionally requesting structured JSON output.
@@ -276,7 +277,7 @@
     const existingWorkspaceGroups =
       context.existingWorkspaceGroups ||
       getExistingWorkspaceGroups(currentWorkspaceId);
-    const tabRecords = buildCloudTabRecords(context.tabs);
+    const tabRecords = context.tabRecords || buildCloudTabRecords(context.tabs);
     const prompt = buildGeminiPrompt(
       tabRecords,
       buildExistingGroupPromptRecords(existingWorkspaceGroups),
@@ -297,7 +298,7 @@
       );
     }
 
-    return mapProviderAssignments(responseData.assignments, tabRecords);
+    return mapProviderAssignments(responseData, tabRecords, existingWorkspaceGroups);
   };
 
   ns.registerProvider({

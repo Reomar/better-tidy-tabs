@@ -13,6 +13,24 @@
     MAX_EMBEDDING_CACHE_SIZE: 250,
   };
 
+  // Initial tuning values; URL evidence supports, but never replaces, semantics.
+  ns.GROUPING_CONFIG = {
+    HOST_BOOST: 0.08,
+    PLATFORM_HOST_BOOST: 0.03,
+    REPOSITORY_BOOST: 0.12,
+    MIN_AVERAGE_SEMANTIC: 0.30,
+    MIN_PAIR_SEMANTIC: 0.20,
+    REUSE_THRESHOLD: 0.55,
+    REUSE_MEMBER_SEMANTIC: 0.35,
+    REUSE_MARGIN: 0.08,
+    EMBEDDING_MODEL: "Mozilla/smart-tab-embedding",
+    EMBEDDING_PREPROCESSING_VERSION: "v2",
+    MULTIPURPOSE_HOSTS: [
+      "github.com", "gitlab.com", "google.com", "bing.com", "youtube.com",
+      "reddit.com", "stackoverflow.com", "wikipedia.org",
+    ],
+  };
+
   ns.SELECTORS = {
     SEPARATORS:
       ".pinned-tabs-container-separator, .vertical-pinned-tabs-container-separator, .better-tidy-tabs-generated-separator",
@@ -42,6 +60,7 @@
   ns.CLOUD_PROMPT_CONFIG = {
     MAX_TITLE_LENGTH: 120,
     MAX_PATH_HINT_LENGTH: 60,
+    MAX_SEARCH_HINT_LENGTH: 80,
     MAX_GROUP_SAMPLE_TITLES: 3,
     MAX_GROUP_NAME_LENGTH: 24,
     BASE_OUTPUT_TOKENS: 512,

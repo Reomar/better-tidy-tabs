@@ -169,6 +169,12 @@
           tab.getAttribute("zen-workspace-id") === workspaceId);
         if (!tabs.length) continue;
         let group = saved.element;
+        // Sorting may recreate a destination drained by an earlier synchronous move.
+        // Reuse only its recorded after-snapshot replacement, avoiding duplicate native IDs.
+        if (!group.isConnected) {
+          group = snapshot.after.groups.find((entry) => entry.id === saved.id &&
+            entry.element.isConnected)?.element || group;
+        }
         if (!group.isConnected || !groupTabs(group).length) {
           // An empty native group may have an asynchronous removal scheduled.
           if (group.isConnected) group.remove();

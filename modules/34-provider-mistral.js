@@ -34,7 +34,7 @@
     const existingWorkspaceGroups =
       context.existingWorkspaceGroups ||
       getExistingWorkspaceGroups(context.workspaceId);
-    const tabRecords = buildCloudTabRecords(context.tabs);
+    const tabRecords = context.tabRecords || buildCloudTabRecords(context.tabs);
     const prompt = buildCloudAssignmentsPrompt(
       tabRecords,
       buildExistingGroupPromptRecords(existingWorkspaceGroups),
@@ -56,7 +56,7 @@
     });
 
     if (!responseData) return null;
-    return mapProviderAssignments(responseData.assignments, tabRecords);
+    return mapProviderAssignments(responseData, tabRecords, existingWorkspaceGroups);
   };
 
   ns.registerProvider({
