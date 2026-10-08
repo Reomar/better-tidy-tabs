@@ -17,7 +17,7 @@
   "readme": "https://raw.githubusercontent.com/Reomar/better-tidy-tabs/main/README.md",
   "image": "https://raw.githubusercontent.com/Reomar/better-tidy-tabs/main/image.png",
   "author": "Reomar",
-  "version": "1.4.0",
+  "version": "1.4.1",
   "tags": [
     "Fork",
     "Zen Browser",
@@ -29,7 +29,7 @@
     "Sine Mods"
   ],
   "createdAt": "2025-09-20",
-  "updatedAt": "2026-06-26 00:30",
+  "updatedAt": "2026-10-08 12:02",
   "modules": ["Vertex-Mods/Advanced-Tab-Groups"],
   "ai": "yes",
   "fork": ["zen"]
