@@ -14,6 +14,9 @@
     "30-provider-gemini.js",
     "31-provider-local.js",
     "32-provider-openrouter.js",
+    "33-provider-groq.js",
+    "34-provider-mistral.js",
+    "35-workspace-state.js",
     "40-sorting.js",
     "50-ui.js",
   ];

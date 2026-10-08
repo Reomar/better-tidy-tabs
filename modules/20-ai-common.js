@@ -8,6 +8,8 @@
     state,
     CLOUD_PROMPT_CONFIG,
     ATG_ICON_CATALOG,
+    GROQ_CONFIG,
+    MISTRAL_CONFIG,
   } = ns;
   const {
     getActiveWorkspaceId,
@@ -16,6 +18,7 @@
     getFilteredTabs,
     getIconCatalogPromptText,
     normalizeIconId,
+    normalizeTopicKey,
     truncateText,
   } = ns;
 
@@ -274,6 +277,46 @@
     }
   };
 
+  // Read the Groq model preference, using a supported default when it is blank.
+  const getGroqModel = () => {
+    try {
+      return Services.prefs
+        .getStringPref(PREFS.GROQ_MODEL, GROQ_CONFIG.DEFAULT_MODEL)
+        .trim() || GROQ_CONFIG.DEFAULT_MODEL;
+    } catch {
+      return GROQ_CONFIG.DEFAULT_MODEL;
+    }
+  };
+
+  // Read and trim the Groq API key from Firefox prefs.
+  const getGroqApiKey = () => {
+    try {
+      return Services.prefs.getStringPref(PREFS.GROQ_API_KEY, "").trim();
+    } catch {
+      return "";
+    }
+  };
+
+  // Read the Mistral model preference, using a supported default when it is blank.
+  const getMistralModel = () => {
+    try {
+      return Services.prefs
+        .getStringPref(PREFS.MISTRAL_MODEL, MISTRAL_CONFIG.DEFAULT_MODEL)
+        .trim() || MISTRAL_CONFIG.DEFAULT_MODEL;
+    } catch {
+      return MISTRAL_CONFIG.DEFAULT_MODEL;
+    }
+  };
+
+  // Read and trim the Mistral API key from Firefox prefs.
+  const getMistralApiKey = () => {
+    try {
+      return Services.prefs.getStringPref(PREFS.MISTRAL_API_KEY, "").trim();
+    } catch {
+      return "";
+    }
+  };
+
   // Collect existing groups in the active workspace for provider reuse decisions.
   const getExistingWorkspaceGroups = (workspaceId) => {
     const existingWorkspaceGroups = new Map();
@@ -283,6 +326,7 @@
 
     const groupSelector = `tab-group:has(tab[zen-workspace-id="${workspaceId}"])`;
     document.querySelectorAll(groupSelector).forEach((groupEl) => {
+      if (ns.isGroupLocked?.(groupEl) || ns.isOrdinaryGroup?.(groupEl) === false) return;
       const label = groupEl.getAttribute("label");
       if (!label) return;
 
@@ -303,11 +347,10 @@
   };
 
   // Build the common provider context so all providers receive the same inputs.
-  const buildProviderContext = (tabs) => {
+  const buildProviderContext = (tabs, { mode = "new-tabs", workspaceId = getActiveWorkspaceId() } = {}) => {
     const validTabs = Array.isArray(tabs)
       ? tabs.filter((tab) => tab?.isConnected)
       : [];
-    const workspaceId = getActiveWorkspaceId();
     const existingWorkspaceGroups = getExistingWorkspaceGroups(workspaceId);
     const groupSelector = workspaceId
       ? `tab-group:has(tab[zen-workspace-id="${workspaceId}"])`
@@ -315,6 +358,7 @@
 
     return {
       tabs: validTabs,
+      mode,
       workspaceId,
       groupSelector,
       existingWorkspaceGroups,
@@ -353,22 +397,27 @@
   const buildExistingGroupPromptRecords = (existingWorkspaceGroups) =>
     Array.from(existingWorkspaceGroups.entries()).map(([groupName, groupInfo]) => ({
       name: groupName,
-      sampleTitles: groupInfo.tabTitles
-        .slice(0, CLOUD_PROMPT_CONFIG.MAX_GROUP_SAMPLE_TITLES)
-        .map((title) =>
-          truncateText(title, CLOUD_PROMPT_CONFIG.MAX_TITLE_LENGTH)
-        ),
+      // Mixed leftovers are not examples of a topic the model should reuse.
+      sampleTitles:
+        normalizeTopicKey(groupName) === "others"
+          ? []
+          : groupInfo.tabTitles
+              .slice(0, CLOUD_PROMPT_CONFIG.MAX_GROUP_SAMPLE_TITLES)
+              .map((title) =>
+                truncateText(title, CLOUD_PROMPT_CONFIG.MAX_TITLE_LENGTH)
+              ),
     }));
 
   // Build the provider-agnostic grouping prompt used by cloud models.
-  const buildCloudAssignmentsPrompt = (tabRecords, existingGroups) => {
+  const buildCloudAssignmentsPrompt = (tabRecords, existingGroups, mode = "new-tabs") => {
     const existingGroupsText =
       existingGroups.length === 0
         ? "None"
         : existingGroups
-            .map(
-              (group) =>
-                `${group.name}: ${group.sampleTitles.join(" | ") || "No samples"}`
+            .map((group) =>
+              normalizeTopicKey(group.name) === "others"
+                ? `${group.name}: residual bucket only; its contents do not define a topic.`
+                : `${group.name}: ${group.sampleTitles.join(" | ") || "No samples"}`
             )
             .join("\n");
 
@@ -382,29 +431,40 @@
       .join("\n");
 
     return [
-      "Group browser tabs by browsing task or topic.",
-      "Create as few groups as reasonably possible while still keeping them useful.",
+      "Group the incoming browser tabs by browsing task or topic.",
+      mode === "reorganize"
+        ? "Reorganize mode: these tabs include previously AI-grouped tabs. Reassess every tab against the current tasks; its previous group is not a fixed assignment."
+        : "Sort-new-tabs mode: assign only the listed tabs; existing group members are context and stay in place.",
+      "First identify coherent tasks among the incoming tabs from their titles, hosts, and paths.",
+      "Then compare those tasks with existing topical groups as optional reuse candidates.",
+      "Create a new group when at least two incoming tabs share a distinct task that an existing group does not clearly cover.",
+      "Creating new groups and reusing existing groups are equally valid outcomes.",
+      "Reuse an existing topical group only when its purpose and sample titles clearly match the task; use its exact name when you do.",
+      "An existing group's presence or broad name alone is not evidence that a tab belongs there.",
+      "Keep distinct tasks separate even when a broad existing group could contain both.",
+      "Avoid duplicate topics and unnecessary fragmentation, while keeping every useful distinct task visible.",
       "Prefer broad task-oriented groups over narrow repo-name or page-name groups.",
-      "You must decide the final grouping yourself from the provided tabs and existing groups.",
-      "Reuse an existing group only when it is clearly the best fit, and use the exact existing group name when you do.",
-      "Use concise title-case task names with at most 24 characters.",
-      "Never create a new group for a single tab.",
-      "Any tab that does not clearly belong with at least one other tab must be assigned to Others.",
-      "Prefer Others over creating a narrow, speculative, or weakly supported group.",
-      "Prefer merging closely related tabs into a broader topic instead of creating another small group.",
       "Favor useful work-context grouping over literal title similarity.",
+      "Use concise title-case task names with at most 24 characters.",
+      "Never create a new topical group for a single tab; one incoming tab may join a clearly matching existing topical group.",
+      "Only after deciding useful new groups and clear existing-group matches, assign remaining unrelated or uncertain tabs to Others.",
+      "Others is a residual bucket, not a topical group. Its mixed contents must never guide topic matching or absorb an identifiable task.",
+      "An existing Others group does not reduce the need to create useful new groups.",
+      "For residual tabs, reuse the exact existing Others name if present; otherwise use Others. This bucket may contain a single residual tab.",
+      "Example: with existing Coding and Others, flight and hotel tabs form Travel Planning; a matching coding-doc tab may join Coding; one unrelated tab may go to Others.",
+      "Assign each incoming tab exactly once. You decide the final grouping.",
       "Choose exactly one iconId for each assignment from the supported icon catalog below.",
       'Return only valid JSON with this exact shape: {"assignments":[{"tabId":"t1","topic":"Example","iconId":"folder"}]}.',
       "Do not include markdown fences, prose, explanations, or extra keys.",
       "",
-      "Supported icons:",
-      getIconCatalogPromptText(),
+      "Incoming tabs to group:",
+      tabsText,
       "",
-      "Existing groups:",
+      "Existing groups (optional reuse context):",
       existingGroupsText,
       "",
-      "Tabs:",
-      tabsText,
+      "Supported icons:",
+      getIconCatalogPromptText(),
     ].join("\n");
   };
 
@@ -498,6 +558,10 @@
         return "Gemini";
       case PROVIDERS.OPENROUTER:
         return "OpenRouter";
+      case PROVIDERS.GROQ:
+        return "Groq";
+      case PROVIDERS.MISTRAL:
+        return "Mistral";
       case PROVIDERS.FIREFOX_LOCAL:
         return "Firefox local AI";
       default:
@@ -525,6 +589,144 @@
   const hasValidAssignmentsPayload = (payload) =>
     Array.isArray(payload?.assignments);
 
+  // Call an OpenAI-compatible chat endpoint and convert failures into the
+  // standard visible cloud-to-local fallback feedback.
+  const requestOpenAICompatibleAssignments = async ({
+    providerId,
+    providerLabel,
+    apiUrl,
+    apiKey,
+    modelName,
+    prompt,
+    maxOutputTokens,
+    timeoutMs,
+    tokenLimitField,
+  }) => {
+    const showFailure = (message) => {
+      setProviderFeedback({
+        providerId,
+        title: providerLabel,
+        message: `${message} Using Firefox local AI instead.`,
+      });
+    };
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+
+    try {
+      const requestBody = {
+        model: modelName,
+        messages: [
+          {
+            role: "system",
+            content: "You are a tab-grouping assistant. Return only valid JSON.",
+          },
+          { role: "user", content: prompt },
+        ],
+        temperature: 0.2,
+      };
+      requestBody[tokenLimitField] = maxOutputTokens;
+
+      const response = await fetch(apiUrl, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${apiKey}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(requestBody),
+        signal: controller.signal,
+      });
+
+      if (!response.ok) {
+        const responseText = await response.text().catch(() => "");
+        let errorData = null;
+        try {
+          errorData = responseText ? JSON.parse(responseText) : null;
+        } catch {
+          // The status code is enough to produce useful fallback feedback.
+        }
+        const status = response.status;
+        const errorCode = errorData?.error?.code || errorData?.code || "";
+        let message = `${providerLabel} request failed`;
+
+        if (status === 401 || status === 403) {
+          message = `${providerLabel} rejected the API key`;
+        } else if (status === 404) {
+          message = `${providerLabel} model is unavailable`;
+        } else if (status === 429) {
+          message = `${providerLabel} rate limit was reached`;
+        } else if (status === 400) {
+          message = `${providerLabel} rejected the request; check the selected model`;
+        } else if (status >= 500) {
+          message = `${providerLabel} is temporarily unavailable`;
+        }
+
+        console.warn(
+          `[TabSort][${providerLabel}] Chat request failed with status ${status}${
+            errorCode ? ` (${errorCode})` : ""
+          }.`
+        );
+        showFailure(message);
+        return null;
+      }
+
+      const responseData = await response.json();
+      const content = responseData?.choices?.[0]?.message?.content;
+      const rawText =
+        typeof content === "string"
+          ? content.trim()
+          : Array.isArray(content)
+            ? content
+                .map((part) =>
+                  typeof part === "string"
+                    ? part
+                    : typeof part?.text === "string"
+                      ? part.text
+                      : ""
+                )
+                .join("")
+                .trim()
+            : "";
+
+      if (!rawText) {
+        showFailure(`${providerLabel} returned an empty response`);
+        return null;
+      }
+
+      let payload;
+      try {
+        payload = parseAssignmentsPayloadText(rawText);
+      } catch (error) {
+        console.warn(
+          `[TabSort][${providerLabel}] Could not parse the chat response as JSON:`,
+          error
+        );
+        showFailure(`${providerLabel} returned invalid JSON`);
+        return null;
+      }
+
+      if (!hasValidAssignmentsPayload(payload)) {
+        showFailure(`${providerLabel} returned an invalid assignments response`);
+        return null;
+      }
+
+      return payload;
+    } catch (error) {
+      if (error?.name === "AbortError") {
+        showFailure(
+          `${providerLabel} request timed out after ${Math.round(timeoutMs / 1000)}s`
+        );
+      } else if (error instanceof TypeError) {
+        showFailure(`${providerLabel} network request failed`);
+      } else {
+        console.warn(`[TabSort][${providerLabel}] Chat request failed:`, error);
+        showFailure(`${providerLabel} request failed`);
+      }
+      return null;
+    } finally {
+      clearTimeout(timeoutId);
+    }
+  };
+
   Object.assign(ns, {
     averageEmbedding,
     cosineSimilarity,
@@ -539,6 +741,10 @@
     getGeminiApiKey,
     getOpenRouterApiKey,
     getOpenRouterModel,
+    getGroqApiKey,
+    getGroqModel,
+    getMistralApiKey,
+    getMistralModel,
     getExistingWorkspaceGroups,
     buildProviderContext,
     buildCloudTabRecords,
@@ -554,5 +760,6 @@
     formatProviderLabel,
     createProviderError,
     hasValidAssignmentsPayload,
+    requestOpenAICompatibleAssignments,
   });
 })();

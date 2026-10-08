@@ -263,7 +263,8 @@
     const tabRecords = buildCloudTabRecords(context.tabs);
     const prompt = buildCloudAssignmentsPrompt(
       tabRecords,
-      buildExistingGroupPromptRecords(existingWorkspaceGroups)
+      buildExistingGroupPromptRecords(existingWorkspaceGroups),
+      context.mode
     );
     const responseData = await requestOpenRouterAssignments(
       prompt,

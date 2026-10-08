@@ -193,12 +193,31 @@
    Keep it open only when sorting is available. */
 :is(#vertical-pinned-tabs-container, #zen-essentials)
   .zen-workspace-tabs-section[hide-separator]
-  .pinned-tabs-container-separator:has(#sort-button:not(.hidden-button)) {
+  .pinned-tabs-container-separator:has(:is(#sort-button, #better-tidy-tabs-actions):not(.hidden-button)) {
   height: 22px !important;
   min-height: 22px !important;
   max-height: 22px !important;
   opacity: 1 !important;
   overflow: visible !important;
+}
+
+#better-tidy-tabs-actions {
+  appearance: none !important;
+  min-width: 20px !important;
+  padding: 0 3px !important;
+  margin: 0 !important;
+  flex-shrink: 0;
+  opacity: 0.7;
+  cursor: pointer;
+}
+
+#better-tidy-tabs-actions:hover {
+  opacity: 1;
+}
+
+#better-tidy-tabs-actions.hidden-button,
+:root:not([zen-sidebar-expanded="true"]) #better-tidy-tabs-actions {
+  display: none !important;
 }
 
 .pinned-tabs-container-separator:hover svg {

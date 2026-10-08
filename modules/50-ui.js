@@ -37,7 +37,6 @@
 
         separator.insertBefore(svg, separator.firstChild);
       }
-
       if (!separator.querySelector("#sort-button")) {
         const nativeClearButton = separator.querySelector(
           ".zen-workspace-close-unpinned-tabs-button"
@@ -65,6 +64,22 @@
         } else {
           separator.appendChild(buttonNode);
         }
+      }
+      if (!separator.querySelector("#better-tidy-tabs-actions")) {
+        const actions = window.MozXULElement.parseXULToFragment(`
+          <toolbarbutton id="better-tidy-tabs-actions" type="menu" label="..."
+            class="better-tidy-tabs-actions" tooltiptext="Tab sorting actions"
+            aria-label="Tab sorting actions" data-better-tidy-tabs="actions">
+            <menupopup class="better-tidy-tabs-action-popup">
+              <menuitem label="Sort new tabs" data-better-tidy-tabs-action="sort-new"/>
+              <menuitem label="Reorganize workspace" data-better-tidy-tabs-action="reorganize"/>
+              <menuitem label="Undo last sort" data-better-tidy-tabs-action="undo"/>
+              <menuseparator/>
+              <menu label="Group settings"><menupopup class="better-tidy-tabs-group-settings"/></menu>
+            </menupopup>
+          </toolbarbutton>
+        `).firstChild;
+        separator.querySelector("#sort-button").after(actions);
       }
     } catch (error) {
       console.error("[TabSort] Failed to ensure sort button exists:", error);
@@ -286,9 +301,10 @@
   };
 
   // Trigger one end-to-end sort action from a clicked sidebar button.
-  const triggerSortFromButton = (sortButton) => {
+  const triggerSortFromButton = (sortButton, mode = "new-tabs") => {
+    if (state.isSorting || state.disposed) return;
     if (!sortButton?.isConnected) {
-      sortTabsByTopic();
+      sortTabsByTopic({ mode });
       return;
     }
 
@@ -305,12 +321,47 @@
       `:is(${ns.SELECTORS.SEPARATORS})`
     );
     if (!separator) {
-      sortTabsByTopic();
+      sortTabsByTopic({ mode });
       return;
     }
 
     startSortWaveAnimation(separator);
-    sortTabsByTopic();
+    sortTabsByTopic({ mode });
+  };
+
+  const populateSortActions = (popup) => {
+    const workspaceId = getActiveWorkspaceId();
+    const setDisabled = (action, disabled) => {
+      const item = popup.querySelector(`[data-better-tidy-tabs-action="${action}"]`);
+      if (item) item.disabled = disabled;
+    };
+    setDisabled("sort-new", state.isSorting || !ns.getSortableTabs(workspaceId).length);
+    setDisabled("reorganize", state.isSorting || !ns.getSortableTabs(workspaceId, "reorganize").length);
+    setDisabled("undo", state.isSorting || !ns.canUndoSort());
+    const settings = popup.querySelector(".better-tidy-tabs-group-settings");
+    settings.replaceChildren();
+    const groups = ns.getWorkspaceGroups(workspaceId).filter(ns.isOrdinaryGroup);
+    settings.parentElement.disabled = !groups.length || state.isSorting;
+    for (const group of groups) {
+      const menu = document.createXULElement("menu");
+      menu.setAttribute("label", group.getAttribute("label") || "Unnamed group");
+      const groupPopup = document.createXULElement("menupopup");
+      for (const [action, label, checked] of [
+        ["managed", "Allow reorganization", ns.isManagedGroup(group)],
+        ["locked", "Lock group", ns.isGroupLocked(group)],
+      ]) {
+        const item = document.createXULElement("menuitem");
+        item.setAttribute("type", "checkbox");
+        item.setAttribute("label", label);
+        item.setAttribute("data-better-tidy-tabs-action", action);
+        item.setAttribute("checked", String(checked));
+        item.disabled = action === "managed" && ns.isGroupLocked(group);
+        item._betterTidyTabsGroup = group;
+        groupPopup.appendChild(item);
+      }
+      menu.appendChild(groupPopup);
+      settings.appendChild(menu);
+    }
   };
 
   // Create the optional command and bind click listeners once.
@@ -359,7 +410,43 @@
         triggerSortFromButton(sortButton);
       };
 
+      state.popupHandler = (event) => {
+        if (event.target?.matches?.(".better-tidy-tabs-action-popup")) {
+          populateSortActions(event.target);
+        }
+      };
+      state.actionMenuHandler = (event) => {
+        const item = event.target?.closest?.("[data-better-tidy-tabs-action]");
+        if (!item || state.isSorting || state.disposed) return;
+        event.stopPropagation();
+        const action = item.getAttribute("data-better-tidy-tabs-action");
+        const group = item._betterTidyTabsGroup;
+        if (action === "undo") ns.undoLastSort();
+        else if (group?.isConnected && action === "managed") {
+          ns.setGroupManaged(group, !ns.isManagedGroup(group));
+        } else if (group?.isConnected && action === "locked") {
+          ns.setGroupLocked(group, !ns.isGroupLocked(group));
+        } else if (action === "sort-new" || action === "reorganize") {
+          const separator = item.closest(`:is(${ns.SELECTORS.SEPARATORS})`);
+          triggerSortFromButton(separator?.querySelector("#sort-button"),
+            action === "reorganize" ? "reorganize" : "new-tabs");
+        }
+        updateButtonsVisibilityState();
+      };
+      state.contextMenuHandler = (event) => {
+        const button = event.target?.closest?.("#sort-button");
+        if (!button) return;
+        const popup = button.parentElement.querySelector(".better-tidy-tabs-action-popup");
+        if (!popup) return;
+        event.preventDefault();
+        event.stopPropagation();
+        popup.openPopup(button, "after_start");
+      };
+
       document.addEventListener("click", state.clickHandler, true);
+      document.addEventListener("command", state.actionMenuHandler, true);
+      document.addEventListener("popupshowing", state.popupHandler);
+      document.addEventListener("contextmenu", state.contextMenuHandler, true);
       if (zenCommands) {
         zenCommands.addEventListener("command", state.commandHandler);
       }
@@ -640,7 +727,7 @@
                 tidyButton.setAttribute(
                   "tooltiptext",
                   ungroupedTotal === 1
-                    ? "Sort Tab into Existing Groups by Topic (AI)"
+                    ? "Sort New Tab by Topic (AI)"
                     : "Sort Tabs into Groups by Topic (AI)"
                 );
               } else {
@@ -653,6 +740,16 @@
               tidyButton.classList.add("hidden-button");
             }
           }
+
+          const actionsButton = separator.querySelector("#better-tidy-tabs-actions");
+          const workspaceId = getActiveWorkspaceId();
+          if (actionsButton) {
+            const hasActions = ns.getSortableTabs(workspaceId, "reorganize").length > 0 ||
+              ns.getWorkspaceGroups(workspaceId).some(ns.isOrdinaryGroup) || ns.canUndoSort();
+            actionsButton.classList.toggle("hidden-button", !hasActions);
+            actionsButton.disabled = state.isSorting;
+          }
+          if (tidyButton) tidyButton.disabled = state.isSorting;
 
           separator.classList.remove("has-no-sortable-tabs");
         });
@@ -722,6 +819,8 @@
   // Remove listeners, restore hooks, and clear cached runtime state.
   const cleanup = () => {
     try {
+      state.disposed = true;
+      state.isPlayingFailureAnimation = false;
       cleanupAnimation();
 
       if (state.initIntervalId !== null) {
@@ -739,6 +838,11 @@
       if (state.sortButtonListenerAdded && state.clickHandler) {
         document.removeEventListener("click", state.clickHandler, true);
       }
+      document.removeEventListener("command", state.actionMenuHandler, true);
+      document.removeEventListener("popupshowing", state.popupHandler);
+      document.removeEventListener("contextmenu", state.contextMenuHandler, true);
+      document.querySelectorAll("[data-better-tidy-tabs=\"actions\"]").forEach((element) => element.remove());
+      state.undoSnapshots.clear();
 
       if (
         state.eventListenersAdded &&
@@ -804,6 +908,9 @@
       state.eventListenersAdded = false;
       state.commandHandler = null;
       state.clickHandler = null;
+      state.actionMenuHandler = null;
+      state.popupHandler = null;
+      state.contextMenuHandler = null;
       state.tabEventHandler = null;
       state.workspaceSwitchHandler = null;
       state.workspaceHooksInstalled = false;

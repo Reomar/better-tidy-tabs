@@ -16,8 +16,8 @@
   } = ns;
 
   // Build the full Gemini prompt from tabs, existing groups, and icon choices.
-  const buildGeminiPrompt = (tabRecords, existingGroups) =>
-    buildCloudAssignmentsPrompt(tabRecords, existingGroups);
+  const buildGeminiPrompt = (tabRecords, existingGroups, mode) =>
+    buildCloudAssignmentsPrompt(tabRecords, existingGroups, mode);
 
   // Flatten Gemini response parts into one plain text payload.
   const parseGeminiResponseText = (responseData) => {
@@ -279,7 +279,8 @@
     const tabRecords = buildCloudTabRecords(context.tabs);
     const prompt = buildGeminiPrompt(
       tabRecords,
-      buildExistingGroupPromptRecords(existingWorkspaceGroups)
+      buildExistingGroupPromptRecords(existingWorkspaceGroups),
+      context.mode
     );
 
     const responseData = await requestGeminiAssignments(

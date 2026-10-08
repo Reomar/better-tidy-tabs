@@ -298,7 +298,7 @@
     assignments,
     existingGroupNameMap = new Map()
   ) => {
-    const finalGroups = {};
+    const finalGroups = Object.create(null);
     const seenTabs = new Set();
 
     assignments.forEach(({ tab, topic, iconId }) => {

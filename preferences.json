@@ -24,6 +24,14 @@
       {
         "value": "openrouter",
         "label": "OpenRouter"
+      },
+      {
+        "value": "groq",
+        "label": "Groq"
+      },
+      {
+        "value": "mistral",
+        "label": "Mistral"
       }
     ]
   },
@@ -44,5 +52,29 @@
     "label": "OpenRouter Model Name",
     "property": "extension.zen-tidy-tabs.openrouter-model",
     "placeholder": "google/gemma-4-27b-it:free"
+  },
+  {
+    "type": "string",
+    "label": "Groq API Key",
+    "property": "extension.zen-tidy-tabs.groq-api-key",
+    "placeholder": "gsk_..."
+  },
+  {
+    "type": "string",
+    "label": "Groq Model Name",
+    "property": "extension.zen-tidy-tabs.groq-model",
+    "placeholder": "openai/gpt-oss-20b"
+  },
+  {
+    "type": "string",
+    "label": "Mistral API Key",
+    "property": "extension.zen-tidy-tabs.mistral-api-key",
+    "placeholder": "..."
+  },
+  {
+    "type": "string",
+    "label": "Mistral Model Name",
+    "property": "extension.zen-tidy-tabs.mistral-model",
+    "placeholder": "mistral-small-latest"
   }
 ]

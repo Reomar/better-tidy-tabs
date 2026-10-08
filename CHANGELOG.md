@@ -2,6 +2,13 @@
 
 This changelog covers changes introduced in this fork after the upstream fork point at `1780bc1` from `Vertex-Mods/Zen-Tidy-Tabs`.
 
+## [1.5.0] - 2026-10-08
+
+- Added Groq and Mistral as optional cloud providers with editable model settings.
+- Added workspace reorganization, persistent group ownership and locks, and one-step Undo.
+- Improved cloud grouping prompts and fallback feedback, and prevented stale provider results from moving changed tabs.
+- Fixed sort control visibility across Zen's vertical sidebar layouts.
+
 ## Added
 
 - Cached local tab embeddings to make repeat Firefox-local sorts faster.
@@ -9,7 +16,7 @@ This changelog covers changes introduced in this fork after the upstream fork po
 - Gemini model fallback handling when one model variant fails.
 - Advanced Tab Groups icon assignment from AI-generated group topics.
 - OpenRouter as an optional cloud sorting provider with custom API key and model name settings.
-- User-visible cloud-provider fallback feedback when OpenRouter fails and the mod falls back to Firefox local AI.
+- User-visible cloud-provider fallback feedback when OpenRouter, Groq, or Mistral fails and the mod falls back to Firefox local AI.
 - A modular runtime split into config, shared AI helpers, provider modules, sorting, and UI/bootstrap layers.
 
 ## Changed
@@ -18,6 +25,8 @@ This changelog covers changes introduced in this fork after the upstream fork po
 - Group ownership moved to the AI provider, so local heuristics no longer silently rename or merge model output afterward.
 - Existing groups are reused only when the provider intentionally returns that group name.
 - Cloud prompts were tightened to prefer fewer, broader groups and to send isolated tabs to `Others` instead of creating singleton groups.
+- Cloud prompts now identify tasks in incoming tabs before considering existing-group reuse, and allow distinct tasks to form new groups.
+- `Others` is considered only for residual tabs after topical grouping, and its mixed contents are excluded from existing-group examples sent to cloud providers.
 - OpenRouter requests were tuned for better reliability on slower free models with:
   - lower output budgets
   - longer request timeout
@@ -26,6 +35,8 @@ This changelog covers changes introduced in this fork after the upstream fork po
 
 ## Fixed
 
+- Sorting now rechecks workspace, navigation, pinned status, and group membership before applying delayed AI results.
+- Reloading the mod cancels pending sort results from the previous runtime.
 - Gemini structured output request formatting.
 - Gemini fallback behavior and invalid-response handling.
 - Fallback group matching around existing groups.

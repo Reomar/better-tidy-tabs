@@ -23,6 +23,8 @@
     FIREFOX_LOCAL: "firefox-local",
     GEMINI: "gemini",
     OPENROUTER: "openrouter",
+    GROQ: "groq",
+    MISTRAL: "mistral",
   };
 
   ns.PREFS = {
@@ -30,6 +32,11 @@
     GEMINI_API_KEY: "extension.zen-tidy-tabs.gemini-api-key",
     OPENROUTER_API_KEY: "extension.zen-tidy-tabs.openrouter-api-key",
     OPENROUTER_MODEL: "extension.zen-tidy-tabs.openrouter-model",
+    GROQ_API_KEY: "extension.zen-tidy-tabs.groq-api-key",
+    GROQ_MODEL: "extension.zen-tidy-tabs.groq-model",
+    MISTRAL_API_KEY: "extension.zen-tidy-tabs.mistral-api-key",
+    MISTRAL_MODEL: "extension.zen-tidy-tabs.mistral-model",
+    GROUP_OWNERSHIP: "extension.zen-tidy-tabs.group-ownership",
   };
 
   ns.CLOUD_PROMPT_CONFIG = {
@@ -57,6 +64,22 @@
     MAX_OUTPUT_TOKENS: 1024,
     OUTPUT_TOKENS_PER_TAB: 14,
     OUTPUT_TOKENS_PER_EXISTING_GROUP: 8,
+  };
+
+  ns.GROQ_CONFIG = {
+    API_URL: "https://api.groq.com/openai/v1/chat/completions",
+    DEFAULT_MODEL: "openai/gpt-oss-20b",
+    REQUEST_TIMEOUT_MS: 60000,
+    TOKEN_LIMIT_FIELD: "max_completion_tokens",
+    MAX_OUTPUT_TOKENS: 1024,
+  };
+
+  ns.MISTRAL_CONFIG = {
+    API_URL: "https://api.mistral.ai/v1/chat/completions",
+    DEFAULT_MODEL: "mistral-small-latest",
+    REQUEST_TIMEOUT_MS: 60000,
+    TOKEN_LIMIT_FIELD: "max_tokens",
+    MAX_OUTPUT_TOKENS: 1024,
   };
 
   ns.ATG_ICON_CATALOG = {
@@ -185,6 +208,11 @@
     initIntervalId: null,
     lastProviderFeedback: null,
     initialized: false,
+    disposed: false,
+    undoSnapshots: new Map(),
+    actionMenuHandler: null,
+    popupHandler: null,
+    contextMenuHandler: null,
   };
 
   ns.providerRegistry = new Map();
